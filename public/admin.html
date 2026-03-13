@@ -1,0 +1,1121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PRism — Admin Panel</title>
+<link rel="stylesheet" href="/assets/css/base.css">
+<script src="/assets/js/sounds.js"></script>
+<script src="/socket.io/socket.io.js"></script>
+<script src="/assets/js/prism.js"></script>
+<style>
+/* ── LAYOUT ── */
+.admin-wrap { min-height:100vh; display:flex; flex-direction:column; }
+
+/* Header */
+.topbar {
+  display:flex; align-items:center; justify-content:space-between;
+  padding:14px 28px; border-bottom:1px solid var(--border);
+  background:rgba(10,11,15,.92); backdrop-filter:blur(16px);
+  position:sticky; top:0; z-index:100;
+}
+.topbar-logo { font-family:var(--font-d); font-size:1.7rem; letter-spacing:2px; color:var(--blue); }
+.topbar-logo span { color:var(--amber); }
+.topbar-logo sub { font-family:var(--font-mono); font-size:.55rem; color:var(--red); letter-spacing:2px; vertical-align:middle; margin-left:8px; }
+.topbar-right { display:flex; align-items:center; gap:14px; }
+
+/* Status strip */
+.status-strip {
+  display:flex; gap:0; border-bottom:1px solid var(--border);
+  background:var(--bg2); overflow-x:auto;
+}
+.status-cell {
+  padding:10px 22px; display:flex; flex-direction:column; gap:3px;
+  border-right:1px solid var(--border); min-width:120px; flex-shrink:0;
+}
+.status-cell-label { font-family:var(--font-mono); font-size:.55rem; letter-spacing:2px; color:var(--text3); text-transform:uppercase; }
+.status-cell-val   { font-family:var(--font-mono); font-size:.82rem; color:var(--text); }
+.status-cell-val.blue   { color:var(--blue); }
+.status-cell-val.green  { color:var(--green); }
+.status-cell-val.amber  { color:var(--amber); }
+.status-cell-val.red    { color:var(--red); }
+.status-cell-val.purple { color:var(--purple); }
+
+/* Main 3-col grid */
+.admin-body {
+  display:grid; grid-template-columns:300px 1fr 300px;
+  gap:0; flex:1; min-height:0;
+}
+@media(max-width:1200px){ .admin-body{grid-template-columns:260px 1fr 260px;} }
+@media(max-width:900px) { .admin-body{grid-template-columns:1fr;} }
+
+.col { border-right:1px solid var(--border); overflow-y:auto; max-height:calc(100vh - 110px); }
+.col:last-child { border-right:none; }
+.col-title {
+  font-family:var(--font-mono); font-size:.6rem; letter-spacing:2.5px;
+  color:var(--text3); text-transform:uppercase;
+  padding:14px 18px 10px; border-bottom:1px solid var(--border);
+  display:flex; align-items:center; justify-content:space-between;
+  position:sticky; top:0; background:var(--bg); z-index:10;
+}
+
+/* ── LEFT COL: ITEMS ── */
+.item-list { padding:10px; display:flex; flex-direction:column; gap:6px; }
+
+.item-row {
+  background:var(--bg2); border:1px solid var(--border);
+  border-radius:var(--radius); padding:12px 14px;
+  cursor:pointer; transition:all .18s; position:relative;
+}
+.item-row:hover { border-color:var(--border2); background:var(--bg3); }
+.item-row.active-item { border-color:rgba(245,158,11,.4); background:rgba(245,158,11,.04); }
+.item-row.sold-item   { opacity:.5; }
+.item-row-top { display:flex; align-items:center; gap:10px; margin-bottom:6px; }
+.item-row-icon { font-size:1.3rem; }
+.item-row-name { font-weight:600; font-size:.85rem; flex:1; }
+.item-row-status { position:absolute; top:10px; right:10px; }
+.item-row-meta { font-family:var(--font-mono); font-size:.62rem; color:var(--text3); display:flex; gap:12px; }
+.item-row-bid  { color:var(--amber); }
+.item-row-actions { display:flex; gap:6px; margin-top:10px; }
+
+/* ── CENTER COL: CONTROLS ── */
+.center-col { padding:18px; display:flex; flex-direction:column; gap:16px; }
+
+/* Auction status hero */
+.auction-hero {
+  background:var(--bg2); border:1px solid var(--border);
+  border-radius:var(--radius-lg); padding:22px; text-align:center;
+  position:relative; overflow:hidden;
+}
+.auction-hero::before {
+  content:''; position:absolute; top:-40px; left:50%; transform:translateX(-50%);
+  width:200px; height:200px;
+  background:radial-gradient(circle, rgba(59,130,246,.06), transparent 70%);
+  pointer-events:none;
+}
+.auction-status-label { font-family:var(--font-mono); font-size:.6rem; letter-spacing:3px; color:var(--text3); margin-bottom:6px; }
+.auction-status-val   { font-family:var(--font-d); font-size:2rem; letter-spacing:2px; margin-bottom:18px; }
+.auction-controls     { display:flex; gap:8px; justify-content:center; flex-wrap:wrap; }
+
+/* Active item spotlight */
+.spotlight {
+  background:var(--bg2); border:1px solid var(--border);
+  border-radius:var(--radius-lg); padding:20px;
+}
+.spotlight.has-item { border-color:rgba(245,158,11,.25); }
+.spotlight-top { display:flex; align-items:flex-start; gap:14px; margin-bottom:16px; }
+.spotlight-icon { font-size:2.2rem; }
+.spotlight-info { flex:1; }
+.spotlight-name { font-size:1.1rem; font-weight:700; margin-bottom:4px; }
+.spotlight-base { font-family:var(--font-mono); font-size:.65rem; color:var(--text3); }
+.spotlight-bid  { font-family:var(--font-d); font-size:3rem; color:var(--amber); letter-spacing:2px; line-height:1; text-shadow:0 0 30px rgba(245,158,11,.25); transition:all .3s; }
+.spotlight-bid.flash { animation:bid-pop .4s ease; }
+@keyframes bid-pop { 0%{color:var(--green);transform:scale(1.06)} 100%{color:var(--amber);transform:scale(1)} }
+.spotlight-leader { font-family:var(--font-mono); font-size:.7rem; color:var(--text2); margin-top:6px; }
+.spotlight-leader span { color:var(--blue); font-weight:700; }
+.no-item { text-align:center; padding:30px; color:var(--text3); font-family:var(--font-mono); font-size:.7rem; }
+
+/* Timer */
+.timer-panel {
+  background:var(--bg2); border:1px solid var(--border);
+  border-radius:var(--radius-lg); padding:18px;
+}
+.timer-display { display:flex; align-items:baseline; gap:10px; margin-bottom:14px; }
+.timer-val { font-family:var(--font-d); font-size:4rem; letter-spacing:3px; color:var(--text); transition:color .3s; line-height:1; }
+.timer-val.urgent { color:var(--red); animation:timer-blink .6s ease infinite; }
+@keyframes timer-blink { 50%{opacity:.5;} }
+.timer-unit { font-family:var(--font-mono); font-size:.7rem; color:var(--text3); letter-spacing:2px; }
+.timer-bar  { height:5px; background:rgba(255,255,255,.06); border-radius:3px; margin-bottom:14px; overflow:hidden; }
+.timer-bar-fill { height:100%; border-radius:3px; background:linear-gradient(90deg,var(--blue),var(--green)); transition:width 1s linear, background 1s; }
+.timer-bar-fill.urgent { background:linear-gradient(90deg,var(--red),#ff7043); }
+.timer-presets { display:flex; gap:6px; margin-bottom:10px; flex-wrap:wrap; }
+.timer-preset { font-family:var(--font-mono); font-size:.65rem; padding:6px 12px; background:var(--bg3); border:1px solid var(--border2); color:var(--text2); border-radius:var(--radius-sm); cursor:pointer; transition:all .18s; }
+.timer-preset:hover { border-color:var(--blue); color:var(--blue); background:var(--blue-dim); }
+.timer-actions { display:flex; gap:8px; flex-wrap:wrap; }
+
+/* Award panel */
+.award-panel {
+  background:var(--bg2); border:1px solid rgba(245,158,11,.2);
+  border-radius:var(--radius-lg); padding:18px;
+}
+
+/* Danger zone */
+.danger-zone {
+  background:var(--bg2); border:1px solid rgba(239,68,68,.15);
+  border-radius:var(--radius-lg); padding:18px;
+}
+
+/* ── RIGHT COL ── */
+.right-col-inner { padding:10px; display:flex; flex-direction:column; gap:12px; }
+
+/* Team cards */
+.team-card {
+  background:var(--bg2); border:1px solid var(--border);
+  border-radius:var(--radius); padding:12px 14px;
+}
+.team-card-top { display:flex; align-items:center; gap:10px; margin-bottom:8px; }
+.team-dot { width:9px; height:9px; border-radius:50%; flex-shrink:0; }
+.team-card-name { font-weight:600; font-size:.85rem; flex:1; }
+.team-card-rank { font-family:var(--font-d); font-size:1.2rem; color:var(--text3); }
+.team-budget-bar { height:3px; background:rgba(255,255,255,.05); border-radius:2px; margin-bottom:8px; overflow:hidden; }
+.team-budget-fill { height:100%; border-radius:2px; transition:width .8s ease; }
+.team-card-stats { display:flex; gap:12px; font-family:var(--font-mono); font-size:.62rem; color:var(--text3); }
+.team-card-stats span { color:var(--text2); }
+
+/* Activity */
+.activity-wrap { padding:0 14px; max-height:320px; overflow-y:auto; }
+
+/* ── ADD ITEM MODAL ── */
+.icon-picker { display:grid; grid-template-columns:repeat(6,1fr); gap:6px; margin-bottom:4px; }
+.icon-opt {
+  font-size:1.3rem; padding:8px; border-radius:6px; text-align:center;
+  cursor:pointer; border:2px solid transparent; background:var(--bg3);
+  transition:all .15s;
+}
+.icon-opt:hover { background:var(--bg4); }
+.icon-opt.selected { border-color:var(--blue); background:var(--blue-dim); }
+
+/* ── RIGHT COL TABS ── */
+.rc-tabs { display:flex; border-bottom:1px solid var(--border); background:var(--bg); position:sticky; top:43px; z-index:9; }
+.rc-tab {
+  flex:1; font-family:var(--font-mono); font-size:.58rem; letter-spacing:1.5px;
+  padding:10px 4px; text-align:center; cursor:pointer; color:var(--text3);
+  border:none; background:none; border-bottom:2px solid transparent;
+  transition:all .18s; text-transform:uppercase;
+}
+.rc-tab:hover { color:var(--text2); }
+.rc-tab.active { color:var(--amber); border-bottom-color:var(--amber); }
+.rc-panel { display:none; }
+.rc-panel.active { display:block; }
+
+/* ── TEAM MANAGEMENT ── */
+.tm-header {
+  display:flex; align-items:center; justify-content:space-between;
+  padding:10px 14px; border-bottom:1px solid var(--border);
+}
+.tm-team-row {
+  display:flex; flex-direction:column; gap:0;
+  border-bottom:1px solid rgba(255,255,255,.03);
+  transition:background .15s;
+}
+.tm-team-row:hover { background:rgba(255,255,255,.015); }
+.tm-team-row-top {
+  display:flex; align-items:center; gap:8px;
+  padding:10px 14px 4px;
+}
+.tm-dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
+.tm-name { font-weight:600; font-size:.82rem; flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.tm-id   { font-family:var(--font-mono); font-size:.6rem; color:var(--text3); }
+.tm-team-row-meta { display:flex; align-items:center; justify-content:space-between; padding:2px 14px 8px; }
+.tm-stats { font-family:var(--font-mono); font-size:.62rem; color:var(--text3); }
+.tm-stats span { color:var(--text2); }
+.tm-actions-row { display:flex; gap:4px; }
+.tm-bar-wrap { height:2px; background:rgba(255,255,255,.05); overflow:hidden; }
+.tm-bar-fill { height:100%; transition:width .6s ease; }
+
+/* color chips in modals */
+.color-chips { display:flex; gap:6px; flex-wrap:wrap; margin-top:6px; }
+.chip {
+  width:22px; height:22px; border-radius:5px; cursor:pointer;
+  border:2px solid transparent; transition:transform .15s, border-color .15s;
+}
+.chip:hover { transform:scale(1.1); }
+.chip.sel { border-color:#fff; transform:scale(1.15); }
+</style>
+</head>
+<body>
+
+<!-- ══ ADMIN LOGIN GATE ══ -->
+<div id="admin-gate" style="display:flex;position:fixed;inset:0;background:var(--bg);z-index:9999;align-items:center;justify-content:center;flex-direction:column;gap:24px">
+  <div style="text-align:center">
+    <div style="font-family:var(--font-d);font-size:4rem;letter-spacing:4px;color:var(--blue);line-height:1">PRism</div>
+    <div style="font-family:var(--font-mono);font-size:.65rem;letter-spacing:4px;color:var(--text3);margin-top:8px">ADMIN ACCESS</div>
+    <div id="gate-room-label" style="font-family:var(--font-mono);font-size:.75rem;color:var(--amber);margin-top:6px;letter-spacing:2px">ROOM —</div>
+  </div>
+  <div style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius-lg);padding:28px;width:100%;max-width:340px">
+    <div class="input-group">
+      <label class="input-label">Admin Password</label>
+      <input class="input" type="password" id="gate-pw" placeholder="Enter admin password" autocomplete="current-password" />
+    </div>
+    <div id="gate-err" style="font-family:var(--font-mono);font-size:.62rem;color:var(--red);min-height:16px;margin-bottom:10px"></div>
+    <button class="btn btn-blue btn-full" onclick="gateLogin()">Open Admin Panel →</button>
+    <div style="text-align:center;margin-top:14px">
+      <a href="/" style="font-family:var(--font-mono);font-size:.6rem;color:var(--text3);text-decoration:none">← Back to Login</a>
+    </div>
+  </div>
+</div>
+
+<div class="admin-wrap page" id="admin-app" style="display:none">
+
+<!-- TOPBAR -->
+<header class="topbar">
+  <div style="display:flex;align-items:center;gap:12px"><div class="topbar-logo">
+    PR<span>ism</span><sub>ADMIN</sub>
+  </div><div class="badge badge-blue" id="room-badge">Room —</div></div>
+  <div class="topbar-right">
+    <div class="ws-indicator">
+      <div class="ws-dot" id="ws-dot"></div>
+      <span class="ws-label mono" style="font-size:.62rem;color:var(--text3);letter-spacing:1px">CONNECTING</span>
+    </div>
+    <button class="btn btn-ghost btn-sm" id="sound-btn" onclick="toggleAdminSound()" title="Toggle sounds">🔊</button>
+    <a href="/display" target="_blank" class="btn btn-ghost btn-sm" id="display-link">📺 Display</a>
+    <button class="btn btn-ghost btn-sm" onclick="doLogout()">Logout</button>
+  </div>
+</header>
+
+<!-- STATUS STRIP -->
+<div class="status-strip">
+  <div class="status-cell">
+    <div class="status-cell-label">Auction</div>
+    <div class="status-cell-val blue" id="ss-status">IDLE</div>
+  </div>
+  <div class="status-cell">
+    <div class="status-cell-label">Active Item</div>
+    <div class="status-cell-val amber" id="ss-item">None</div>
+  </div>
+  <div class="status-cell">
+    <div class="status-cell-label">Current Bid</div>
+    <div class="status-cell-val green" id="ss-bid">—</div>
+  </div>
+  <div class="status-cell">
+    <div class="status-cell-label">Timer</div>
+    <div class="status-cell-val red" id="ss-timer">—</div>
+  </div>
+  <div class="status-cell">
+    <div class="status-cell-label">Leading</div>
+    <div class="status-cell-val purple" id="ss-leader">—</div>
+  </div>
+  <div class="status-cell">
+    <div class="status-cell-label">Connections</div>
+    <div class="status-cell-val" id="ss-conn">—</div>
+  </div>
+  <div class="status-cell">
+    <div class="status-cell-label">Items Sold</div>
+    <div class="status-cell-val" id="ss-sold">0</div>
+  </div>
+</div>
+
+<!-- 3-COL BODY -->
+<div class="admin-body">
+
+  <!-- LEFT: ITEMS -->
+  <div class="col">
+    <div class="col-title">
+      <span>📦 Auction Items</span>
+      <button class="btn btn-blue btn-sm" onclick="openAddItem()">+ Add Item</button>
+    </div>
+    <div class="item-list" id="item-list">
+      <div style="padding:20px;text-align:center;color:var(--text3);font-size:.75rem">Loading...</div>
+    </div>
+  </div>
+
+  <!-- CENTER: CONTROLS -->
+  <div class="col">
+    <div class="col-title"><span>⚡ Auction Control</span></div>
+    <div class="center-col">
+
+      <!-- Auction status -->
+      <div class="auction-hero">
+        <div class="auction-status-label">Session Status</div>
+        <div class="auction-status-val" id="ac-status" style="color:var(--text3)">IDLE</div>
+        <div class="auction-controls">
+          <button class="btn btn-green" id="btn-start"  onclick="emit('admin:start-auction',{})">▶ Start</button>
+          <button class="btn btn-amber" id="btn-pause"  onclick="emit('admin:pause-auction',{})">⏸ Pause</button>
+          <button class="btn btn-blue"  id="btn-resume" onclick="emit('admin:resume-auction',{})">↺ Resume</button>
+          <button class="btn btn-red"   id="btn-end"    onclick="emit('admin:end-auction',{})">■ End</button>
+        </div>
+      </div>
+
+      <!-- Active item spotlight -->
+      <div class="spotlight" id="spotlight">
+        <div class="no-item" id="no-item">
+          <div style="font-size:2rem;margin-bottom:8px">⏳</div>
+          Select an item from the left panel to start bidding
+        </div>
+        <div id="active-item-ui" style="display:none">
+          <div class="spotlight-top">
+            <div class="spotlight-icon" id="sp-icon">📦</div>
+            <div class="spotlight-info">
+              <div class="spotlight-name" id="sp-name">—</div>
+              <div class="spotlight-base" id="sp-base">Base: —</div>
+            </div>
+          </div>
+          <div class="spotlight-bid" id="sp-bid">₹0</div>
+          <div class="spotlight-leader" id="sp-leader">No bids yet</div>
+        </div>
+      </div>
+
+      <!-- Timer -->
+      <div class="timer-panel">
+        <div class="label" style="margin-bottom:12px">⏱ Timer Control</div>
+        <div class="timer-display">
+          <div class="timer-val" id="timer-val">—</div>
+          <div class="timer-unit">SEC</div>
+        </div>
+        <div class="timer-bar"><div class="timer-bar-fill" id="timer-bar" style="width:0%"></div></div>
+        <div class="timer-presets">
+          <div class="timer-preset" onclick="startTimer(30)">30s</div>
+          <div class="timer-preset" onclick="startTimer(45)">45s</div>
+          <div class="timer-preset" onclick="startTimer(60)">60s</div>
+          <div class="timer-preset" onclick="startTimer(90)">90s</div>
+          <div class="timer-preset" onclick="startTimer(120)">2m</div>
+        </div>
+        <div class="timer-actions">
+          <input class="input" type="number" id="custom-sec" placeholder="Custom secs" style="width:130px;padding:8px 12px" />
+          <button class="btn btn-blue btn-sm" onclick="startCustomTimer()">Start</button>
+          <button class="btn btn-ghost btn-sm" onclick="emit('admin:stop-timer',{})">⏹ Stop</button>
+          <button class="btn btn-ghost btn-sm" onclick="emit('admin:extend-timer',{seconds:15})">+15s</button>
+        </div>
+      </div>
+
+      <!-- Award -->
+      <div class="award-panel">
+        <div class="label" style="margin-bottom:12px">🏆 Award Item</div>
+        <div style="font-size:.75rem;color:var(--text2);margin-bottom:14px;line-height:1.6">
+          Awards the active item to the current highest bidder. Updates leaderboard and notifies all teams.
+        </div>
+        <button class="btn btn-amber btn-full btn-lg" onclick="awardItem()">⚡ Award to Highest Bidder</button>
+        <div style="margin-top:8px">
+          <button class="btn btn-ghost btn-full btn-sm" onclick="emit('admin:next-item',{})">⏭ Skip to Next Item</button>
+        </div>
+      </div>
+
+      <!-- Danger zone -->
+      <div class="danger-zone">
+        <div class="label" style="margin-bottom:12px;color:rgba(239,68,68,.6)">⚠ Danger Zone</div>
+        <button class="btn btn-red btn-full" onclick="confirmReset()">↺ Reset Entire Session</button>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- RIGHT: TEAMS + ACTIVITY (tabbed) -->
+  <div class="col">
+    <div class="col-title">
+      <span>👥 Teams &amp; Activity</span>
+      <button class="btn btn-blue btn-sm" onclick="openAddTeam()">+ Add</button>
+    </div>
+
+    <!-- Tab switcher -->
+    <div class="rc-tabs">
+      <button class="rc-tab active" id="rc-tab-teams"    onclick="switchRcTab('teams')">🏷 Teams</button>
+      <button class="rc-tab"        id="rc-tab-activity" onclick="switchRcTab('activity')">📡 Activity</button>
+    </div>
+
+    <!-- Teams panel -->
+    <div class="rc-panel active" id="rc-panel-teams">
+      <div id="tm-team-list"></div>
+    </div>
+
+    <!-- Activity panel -->
+    <div class="rc-panel" id="rc-panel-activity">
+      <div style="padding:10px 14px;display:flex;align-items:center;justify-content:space-between">
+        <span style="font-family:var(--font-mono);font-size:.58rem;letter-spacing:2px;color:var(--text3)">LIVE ACTIVITY</span>
+        <span id="act-count" class="badge badge-blue">0</span>
+      </div>
+      <div class="activity-wrap">
+        <ul class="activity-list" id="activity-list"></ul>
+      </div>
+    </div>
+  </div>
+
+</div>
+</div>
+
+<!-- ADD / EDIT TEAM MODAL -->
+<div class="modal-overlay" id="team-modal">
+  <div class="modal" style="max-width:480px">
+    <div class="modal-title" id="tm-modal-title">➕ Add Team</div>
+    <input type="hidden" id="tm-mode" value="add" />
+    <input type="hidden" id="tm-orig-id" />
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+      <div class="input-group">
+        <label class="input-label">Team ID * <span style="color:var(--text3);font-size:.6rem">(login username)</span></label>
+        <input class="input" type="text" id="tm-id" placeholder="e.g. nexus" autocomplete="off" />
+      </div>
+      <div class="input-group">
+        <label class="input-label">Team Name *</label>
+        <input class="input" type="text" id="tm-name" placeholder="e.g. Team Nexus" />
+      </div>
+      <div class="input-group">
+        <label class="input-label">Password *</label>
+        <input class="input" type="text" id="tm-pw" placeholder="e.g. nexus123" />
+      </div>
+      <div class="input-group">
+        <label class="input-label">Starting Budget (₹)</label>
+        <input class="input" type="number" id="tm-budget" value="50000" placeholder="50000" />
+      </div>
+    </div>
+
+    <div class="input-group">
+      <label class="input-label">Team Color</label>
+      <div class="color-chips" id="tm-chips"></div>
+      <input class="input" type="text" id="tm-color" value="#3b82f6" placeholder="#3b82f6"
+        style="margin-top:8px;width:120px" oninput="onColorInput()" />
+    </div>
+
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('team-modal')">Cancel</button>
+      <button class="btn btn-blue" id="tm-submit-btn" onclick="submitTeam()">Add Team</button>
+    </div>
+  </div>
+</div>
+
+<!-- BUDGET MODAL -->
+<div class="modal-overlay" id="budget-modal">
+  <div class="modal" style="max-width:360px">
+    <div class="modal-title">💰 Adjust Budget</div>
+    <input type="hidden" id="bm-id" />
+
+    <div style="background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius);padding:12px;margin-bottom:16px">
+      <div style="font-family:var(--font-mono);font-size:.6rem;color:var(--text3);margin-bottom:4px">TEAM</div>
+      <div style="font-weight:700;font-size:.9rem" id="bm-name">—</div>
+      <div style="display:flex;gap:16px;margin-top:8px">
+        <div><div style="font-family:var(--font-mono);font-size:.55rem;color:var(--text3)">CURRENT BUDGET</div><div style="font-family:var(--font-mono);font-size:.8rem;color:var(--amber)" id="bm-budget">—</div></div>
+        <div><div style="font-family:var(--font-mono);font-size:.55rem;color:var(--text3)">SPENT SO FAR</div><div style="font-family:var(--font-mono);font-size:.8rem;color:var(--red)" id="bm-spent">—</div></div>
+        <div><div style="font-family:var(--font-mono);font-size:.55rem;color:var(--text3)">REMAINING</div><div style="font-family:var(--font-mono);font-size:.8rem;color:var(--green)" id="bm-rem">—</div></div>
+      </div>
+    </div>
+
+    <div style="display:flex;gap:6px;margin-bottom:14px">
+      <button class="btn btn-blue btn-sm"  id="bm-btn-add" onclick="setBudMode('add')">➕ Add Amount</button>
+      <button class="btn btn-ghost btn-sm" id="bm-btn-set" onclick="setBudMode('set')">🎯 Set Absolute</button>
+    </div>
+
+    <div class="input-group">
+      <label class="input-label" id="bm-label">Amount to Add (₹)</label>
+      <input class="input" type="number" id="bm-amount" placeholder="e.g. 10000" oninput="updateBudPreview()" />
+    </div>
+
+    <div style="font-family:var(--font-mono);font-size:.7rem;min-height:20px;padding:4px 0" id="bm-preview"></div>
+
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('budget-modal')">Cancel</button>
+      <button class="btn btn-green" onclick="submitBudget()">Apply</button>
+    </div>
+  </div>
+</div>
+<div class="modal-overlay" id="add-item-modal">
+  <div class="modal">
+    <div class="modal-title">📦 Add Auction Item</div>
+
+    <div class="input-group">
+      <label class="input-label">Item Name *</label>
+      <input class="input" type="text" id="new-item-name" placeholder="e.g. Wireless Headphones" />
+    </div>
+
+    <div class="input-group">
+      <label class="input-label">Description</label>
+      <input class="input" type="text" id="new-item-desc" placeholder="Short description" />
+    </div>
+
+    <div class="input-group">
+      <label class="input-label">Base Price (₹) *</label>
+      <input class="input" type="number" id="new-item-price" placeholder="e.g. 5000" />
+    </div>
+
+    <div class="input-group">
+      <label class="input-label">Icon</label>
+      <div class="icon-picker" id="icon-picker">
+        🎧 📷 📢 📽️ 🔌 📓 💻 🎮 📱 ⌚ 🎁 🏆 🎯 🔬 🎨 🎤 📡 🚀
+      </div>
+      <input class="input" type="text" id="new-item-icon" placeholder="Or type any emoji" value="📦" style="margin-top:8px" />
+    </div>
+
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('add-item-modal')">Cancel</button>
+      <button class="btn btn-blue" onclick="submitAddItem()">Add Item</button>
+    </div>
+  </div>
+</div>
+
+<!-- EDIT ITEM MODAL -->
+<div class="modal-overlay" id="edit-item-modal">
+  <div class="modal">
+    <div class="modal-title">✏️ Edit Item</div>
+    <input type="hidden" id="edit-item-id" />
+
+    <div class="input-group">
+      <label class="input-label">Item Name *</label>
+      <input class="input" type="text" id="edit-item-name" />
+    </div>
+    <div class="input-group">
+      <label class="input-label">Description</label>
+      <input class="input" type="text" id="edit-item-desc" />
+    </div>
+    <div class="input-group">
+      <label class="input-label">Base Price (₹)</label>
+      <input class="input" type="number" id="edit-item-price" />
+    </div>
+    <div class="input-group">
+      <label class="input-label">Icon</label>
+      <input class="input" type="text" id="edit-item-icon" />
+    </div>
+
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('edit-item-modal')">Cancel</button>
+      <button class="btn btn-blue" onclick="submitEditItem()">Save Changes</button>
+    </div>
+  </div>
+</div>
+
+</div><!-- end #admin-app -->
+
+<div id="toast"></div>
+<canvas id="confetti"></canvas>
+
+<script>
+let appState = null;
+let timerMax = 60;
+
+// ── ROOM from URL ──
+const _urlRoom = new URLSearchParams(location.search).get('room') || 'a';
+
+// ── GATE LOGIN ──
+document.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('gate-room-label').textContent = `ROOM ${_urlRoom.toUpperCase()}`;
+  const badge = document.getElementById('room-badge');
+  const dlnk  = document.getElementById('display-link');
+  if (badge) badge.textContent = 'Room ' + _urlRoom.toUpperCase();
+  if (dlnk)  dlnk.href = '/display?room=' + _urlRoom;
+});
+
+document.getElementById('gate-pw')?.addEventListener('keydown', e => {
+  if (e.key === 'Enter') gateLogin();
+});
+
+async function gateLogin() {
+  const pw  = document.getElementById('gate-pw').value;
+  const err = document.getElementById('gate-err');
+  err.textContent = '';
+  if (!pw) { err.textContent = 'Enter password'; return; }
+  const res = await PRISM.post('/api/auth/admin-login', { password: pw, room: _urlRoom });
+  if (res.success) {
+    document.getElementById('admin-gate').style.display = 'none';
+    document.getElementById('admin-app').style.display  = '';
+    bootAdmin();
+  } else {
+    err.textContent = res.message || 'Invalid password';
+  }
+}
+
+// Check if already authenticated as admin for this room
+PRISM.get('/api/auth/me').then(me => {
+  if (me.role === 'admin' && me.roomId === _urlRoom) {
+    document.getElementById('admin-gate').style.display = 'none';
+    document.getElementById('admin-app').style.display  = '';
+    bootAdmin();
+  }
+  // else: gate stays visible
+});
+
+function bootAdmin() {
+  PRISM.connect();
+  PRISM.socket.on('connect',    () => updateWs(true));
+  PRISM.socket.on('disconnect', () => updateWs(false));
+}
+
+function updateWs(on) {
+  const dot = document.getElementById('ws-dot');
+  const lbl = document.querySelector('.ws-label');
+  if (dot) dot.className = 'ws-dot' + (on ? ' connected' : '');
+  if (lbl) lbl.textContent = on ? 'LIVE' : 'OFFLINE';
+}
+
+// ── STATE UPDATES ──
+window.onStateUpdate = function(s) {
+  appState = s;
+  renderStatusStrip(s);
+  renderItemList(s.items);
+  renderSpotlight(s);
+  renderTimer(s.timer);
+  renderTeams(s.leaderboard);
+  renderActivity(s.activityLog);
+};
+
+window.onBidNew = (d) => {
+  SOUNDS.bid();
+  PRISM.toast(`💰 ${d.teamName}: ${PRISM.fmt(d.amount)}`, 'info', 2000);
+  const el = document.getElementById('sp-bid');
+  if (el) { el.classList.remove('flash'); void el.offsetWidth; el.classList.add('flash'); }
+};
+
+window.onItemSold = (d) => {
+  SOUNDS.winner();
+  PRISM.confetti();
+  PRISM.toast(`🏆 ${d.team?.name} wins ${d.item?.name}!`, 'win', 4000);
+};
+
+window.onTimerTick = (d) => {
+  timerMax = Math.max(timerMax, d.max || timerMax);
+  const tv  = document.getElementById('timer-val');
+  const tb  = document.getElementById('timer-bar');
+  if (!tv || !tb) return;
+  tv.textContent = d.value;
+  tv.className   = 'timer-val' + (d.value <= 10 && d.running ? ' urgent' : '');
+  const pct = timerMax > 0 ? (d.value / timerMax) * 100 : 0;
+  tb.style.width = pct + '%';
+  tb.className   = 'timer-bar-fill' + (d.value <= 10 && d.running ? ' urgent' : '');
+  document.getElementById('ss-timer').textContent = d.value + 's ' + (d.running ? '▶' : '⏹');
+};
+
+window.onTimerEnded = () => { SOUNDS.timerEnd(); PRISM.toast('⏰ Timer ended!', 'error', 2000); };
+window.onAuctionEvent = (type) => PRISM.toast(`Auction ${type}`, 'info', 1800);
+
+// ── RENDER FUNCTIONS ──
+function renderStatusStrip(s) {
+  document.getElementById('ss-status').textContent  = s.auction.status.toUpperCase();
+  document.getElementById('ss-item').textContent    = s.auction.currentItem?.name || 'None';
+  document.getElementById('ss-bid').textContent     = s.auction.currentItem?.current_bid ? PRISM.fmt(s.auction.currentItem.current_bid) : '—';
+  const leader = s.auction.currentItem?.current_leader
+    ? s.teams.find(t => t.id === s.auction.currentItem.current_leader)?.name || '—' : '—';
+  document.getElementById('ss-leader').textContent  = leader;
+  document.getElementById('ss-sold').textContent    = s.items.filter(i => i.status === 'sold').length;
+  document.getElementById('ac-status').textContent  = s.auction.status.toUpperCase();
+
+  // Status color
+  const sc = { idle:'var(--text3)', active:'var(--green)', paused:'var(--amber)', ended:'var(--red)' };
+  document.getElementById('ac-status').style.color = sc[s.auction.status] || 'var(--text3)';
+}
+
+function renderItemList(items) {
+  if (!items || !items.length) {
+    document.getElementById('item-list').innerHTML =
+      '<div style="padding:20px;text-align:center;color:var(--text3);font-size:.75rem">No items. Add one above.</div>';
+    return;
+  }
+  document.getElementById('item-list').innerHTML = items.map(item => {
+    const isActive = appState?.auction?.currentItemId === item.id;
+    const statusBadge = {
+      live:     '<span class="badge badge-red" style="animation:ws-pulse 1.2s infinite">● LIVE</span>',
+      sold:     '<span class="badge badge-ghost">✓ SOLD</span>',
+      upcoming: '<span class="badge badge-ghost">SOON</span>',
+    }[item.status] || '';
+
+    const leader = item.current_leader && appState
+      ? appState.teams.find(t => t.id === item.current_leader)?.name : null;
+
+    return `
+    <div class="item-row ${isActive ? 'active-item' : ''} ${item.status === 'sold' ? 'sold-item' : ''}">
+      <div class="item-row-status">${statusBadge}</div>
+      <div class="item-row-top">
+        <div class="item-row-icon">${item.icon || '📦'}</div>
+        <div class="item-row-name">${item.name}</div>
+      </div>
+      <div class="item-row-meta">
+        <span>Base: ${PRISM.fmt(item.base_price)}</span>
+        ${item.current_bid ? `<span class="item-row-bid">Bid: ${PRISM.fmt(item.current_bid)}</span>` : ''}
+        ${leader ? `<span style="color:var(--blue)">${leader}</span>` : ''}
+      </div>
+      <div class="item-row-actions">
+        ${item.status !== 'sold' ? `<button class="btn btn-amber btn-sm" onclick="activateItem(${item.id},event)">→ Activate</button>` : ''}
+        <button class="btn btn-ghost btn-sm" onclick="openEditItem(${item.id},event)">✏</button>
+        ${item.status !== 'live' ? `<button class="btn btn-red btn-sm" onclick="deleteItem(${item.id},event)">🗑</button>` : ''}
+        ${item.status === 'sold' || item.status === 'live' ? `<button class="btn btn-ghost btn-sm" onclick="resetItem(${item.id},event)">↺</button>` : ''}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function renderSpotlight(s) {
+  const item = s.auction.currentItem;
+  const noItem = document.getElementById('no-item');
+  const activeUI = document.getElementById('active-item-ui');
+  const spotlight = document.getElementById('spotlight');
+
+  if (item && item.status === 'live') {
+    noItem.style.display   = 'none';
+    activeUI.style.display = 'block';
+    spotlight.classList.add('has-item');
+    document.getElementById('sp-icon').textContent = item.icon || '📦';
+    document.getElementById('sp-name').textContent = item.name;
+    document.getElementById('sp-base').textContent = `Base: ${PRISM.fmt(item.base_price)}`;
+
+    const bidEl = document.getElementById('sp-bid');
+    const newBid = PRISM.fmt(item.current_bid || item.base_price);
+    if (bidEl.textContent !== newBid) {
+      bidEl.textContent = newBid;
+      bidEl.classList.remove('flash'); void bidEl.offsetWidth; bidEl.classList.add('flash');
+    }
+
+    const leader = item.current_leader ? s.teams.find(t => t.id === item.current_leader) : null;
+    const leaderEl = document.getElementById('sp-leader');
+    if (leader) leaderEl.innerHTML = `Leading: <span>${leader.name}</span>`;
+    else leaderEl.innerHTML = 'No bids yet';
+  } else {
+    noItem.style.display   = 'block';
+    activeUI.style.display = 'none';
+    spotlight.classList.remove('has-item');
+    timerMax = 60;
+  }
+}
+
+function renderTimer(t) {
+  if (!appState) return;
+  const tv = document.getElementById('timer-val');
+  const tb = document.getElementById('timer-bar');
+  if (!tv) return;
+  if (!t.running && t.value === 0) { tv.textContent = '—'; tb.style.width = '0%'; return; }
+  tv.textContent = t.value;
+  tv.className   = 'timer-val' + (t.value <= 10 && t.running ? ' urgent' : '');
+  timerMax = Math.max(timerMax, t.max || 60);
+  tb.style.width = (timerMax > 0 ? (t.value / timerMax) * 100 : 0) + '%';
+  tb.className   = 'timer-bar-fill' + (t.value <= 10 && t.running ? ' urgent' : '');
+}
+
+// ── RIGHT COL TABS ──
+function switchRcTab(tab) {
+  ['teams','activity'].forEach(t => {
+    document.getElementById(`rc-tab-${t}`).classList.toggle('active', t === tab);
+    document.getElementById(`rc-panel-${t}`).classList.toggle('active', t === tab);
+  });
+}
+
+// ── RENDER TEAMS (management view) ──
+function renderTeams(lb) {
+  if (!lb || !lb.length) {
+    document.getElementById('tm-team-list').innerHTML =
+      '<div style="padding:24px;text-align:center;color:var(--text3);font-family:var(--font-mono);font-size:.68rem">No teams yet<br><br><button class="btn btn-blue btn-sm" onclick="openAddTeam()">+ Add First Team</button></div>';
+    return;
+  }
+  const medals = ['🥇','🥈','🥉'];
+  document.getElementById('tm-team-list').innerHTML = lb.map((t, i) => {
+    const pct = PRISM.pct(t.totalSpent, t.budget);
+    return `
+    <div class="tm-team-row">
+      <div class="tm-team-row-top">
+        <div class="tm-dot" style="background:${t.color};box-shadow:0 0 6px ${t.color}60"></div>
+        <div class="tm-name" title="${t.name}">${t.name}</div>
+        <span class="tm-id">${t.id}</span>
+        <span style="font-family:var(--font-d);font-size:1rem;color:var(--text3);margin-left:4px">${medals[i] || '#'+(i+1)}</span>
+      </div>
+      <div class="tm-bar-wrap"><div class="tm-bar-fill" style="width:${pct}%;background:${t.color}"></div></div>
+      <div class="tm-team-row-meta">
+        <div class="tm-stats">
+          <span>${PRISM.fmt(t.totalSpent)}</span> spent &nbsp;·&nbsp;
+          <span style="color:var(--green)">${PRISM.fmt(t.remaining)}</span> left &nbsp;·&nbsp;
+          <span style="color:var(--amber)">${t.itemsWon}</span> won
+        </div>
+        <div class="tm-actions-row">
+          <button class="btn btn-ghost btn-sm" style="padding:3px 8px;font-size:.62rem" onclick="openEditTeam('${t.id}')" title="Edit name, password, color">✏️</button>
+          <button class="btn btn-ghost btn-sm" style="padding:3px 8px;font-size:.62rem;color:var(--green)" onclick="openBudget('${t.id}')" title="Adjust budget">💰</button>
+          <button class="btn btn-red btn-sm"   style="padding:3px 8px;font-size:.62rem" onclick="deleteTeam('${t.id}','${t.name.replace(/'/g,"\\'")}')">🗑</button>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+// ── TEAM COLOR CHIPS ──
+const TEAM_COLORS = ['#3b82f6','#f59e0b','#a855f7','#22c55e','#ef4444','#ec4899',
+                     '#14b8a6','#f97316','#06b6d4','#84cc16','#e11d48','#7c3aed',
+                     '#0ea5e9','#d97706','#10b981','#8b5cf6','#f43f5e','#2563eb'];
+
+function buildChips(sel) {
+  document.getElementById('tm-chips').innerHTML = TEAM_COLORS.map(c =>
+    `<div class="chip${c===sel?' sel':''}" style="background:${c}" onclick="pickChip('${c}',this)"></div>`
+  ).join('');
+}
+
+function pickChip(c, el) {
+  document.querySelectorAll('#tm-chips .chip').forEach(e => e.classList.remove('sel'));
+  el.classList.add('sel');
+  document.getElementById('tm-color').value = c;
+}
+
+function onColorInput() {
+  const v = document.getElementById('tm-color').value;
+  if (/^#[0-9a-fA-F]{6}$/.test(v)) {
+    document.querySelectorAll('#tm-chips .chip').forEach(e => e.classList.remove('sel'));
+  }
+}
+
+// ── ADD TEAM ──
+function openAddTeam() {
+  document.getElementById('tm-modal-title').textContent = '➕ Add Team';
+  document.getElementById('tm-mode').value    = 'add';
+  document.getElementById('tm-orig-id').value = '';
+  document.getElementById('tm-id').value      = '';
+  document.getElementById('tm-id').disabled   = false;
+  document.getElementById('tm-name').value    = '';
+  document.getElementById('tm-pw').value      = '';
+  document.getElementById('tm-budget').value  = '50000';
+  document.getElementById('tm-color').value   = '#3b82f6';
+  document.getElementById('tm-submit-btn').textContent = 'Add Team';
+  buildChips('#3b82f6');
+  openModal('team-modal');
+}
+
+// ── EDIT TEAM ──
+function openEditTeam(teamId) {
+  const team = appState?.teams?.find(t => t.id === teamId);
+  if (!team) return;
+  document.getElementById('tm-modal-title').textContent = `✏️ Edit — ${team.name}`;
+  document.getElementById('tm-mode').value    = 'edit';
+  document.getElementById('tm-orig-id').value = teamId;
+  document.getElementById('tm-id').value      = team.id;
+  document.getElementById('tm-id').disabled   = true;
+  document.getElementById('tm-name').value    = team.name;
+  document.getElementById('tm-pw').value      = team.password || '';
+  document.getElementById('tm-budget').value  = team.budget;
+  document.getElementById('tm-color').value   = team.color;
+  document.getElementById('tm-submit-btn').textContent = 'Save Changes';
+  buildChips(team.color);
+  openModal('team-modal');
+}
+
+async function submitTeam() {
+  const mode   = document.getElementById('tm-mode').value;
+  const origId = document.getElementById('tm-orig-id').value;
+  const id       = document.getElementById('tm-id').value.trim().toLowerCase();
+  const name     = document.getElementById('tm-name').value.trim();
+  const password = document.getElementById('tm-pw').value.trim();
+  const budget   = parseInt(document.getElementById('tm-budget').value) || 50000;
+  const color    = document.getElementById('tm-color').value || '#3b82f6';
+
+  if (!name)     return PRISM.toast('Team name is required', 'error');
+  if (!password) return PRISM.toast('Password is required', 'error');
+  if (mode === 'add' && !id) return PRISM.toast('Team ID is required', 'error');
+  if (mode === 'add' && !/^[a-z0-9_-]+$/i.test(id))
+    return PRISM.toast('Team ID: letters, numbers, hyphens only', 'error');
+
+  let res;
+  if (mode === 'add') {
+    res = await PRISM.post('/api/teams', { id, name, password, color, budget });
+  } else {
+    res = await PRISM.put(`/api/teams/${origId}`, { name, password, color, budget });
+  }
+
+  if (res.success) {
+    PRISM.toast(mode === 'add' ? `"${name}" added!` : 'Team updated!', 'success');
+    closeModal('team-modal');
+    PRISM.emit('state:request', {});
+  } else {
+    PRISM.toast(res.message || 'Error saving team', 'error');
+  }
+}
+
+async function deleteTeam(id, name) {
+  if (!confirm(`Delete "${name}"?\nThis removes all their bids too.`)) return;
+  const res = await PRISM.del(`/api/teams/${id}`);
+  if (res.success) { PRISM.toast(`${name} removed`, 'info'); PRISM.emit('state:request', {}); }
+  else PRISM.toast(res.message || 'Error', 'error');
+}
+
+// ── BUDGET MODAL ──
+let _budMode = 'add';
+let _budTeam = null;
+
+function openBudget(teamId) {
+  _budTeam = appState?.teams?.find(t => t.id === teamId)
+          || appState?.leaderboard?.find(t => t.id === teamId);
+  if (!_budTeam) return;
+  const budget  = _budTeam.budget || 0;
+  const spent   = _budTeam.total_spent || _budTeam.totalSpent || 0;
+  document.getElementById('bm-id').value  = teamId;
+  document.getElementById('bm-name').textContent   = _budTeam.name;
+  document.getElementById('bm-budget').textContent  = PRISM.fmt(budget);
+  document.getElementById('bm-spent').textContent   = PRISM.fmt(spent);
+  document.getElementById('bm-rem').textContent     = PRISM.fmt(budget - spent);
+  document.getElementById('bm-amount').value = '';
+  document.getElementById('bm-preview').textContent = '';
+  setBudMode('add');
+  openModal('budget-modal');
+}
+
+function setBudMode(mode) {
+  _budMode = mode;
+  document.getElementById('bm-btn-add').className = 'btn btn-sm ' + (mode==='add' ? 'btn-blue' : 'btn-ghost');
+  document.getElementById('bm-btn-set').className = 'btn btn-sm ' + (mode==='set' ? 'btn-blue' : 'btn-ghost');
+  document.getElementById('bm-label').textContent = mode === 'add' ? 'Amount to Add (₹)' : 'Set Budget to (₹)';
+  updateBudPreview();
+}
+
+function updateBudPreview() {
+  if (!_budTeam) return;
+  const cur = _budTeam.budget || 0;
+  const amt = parseInt(document.getElementById('bm-amount').value) || 0;
+  const nxt = _budMode === 'add' ? cur + amt : amt;
+  const el  = document.getElementById('bm-preview');
+  if (!amt) { el.textContent = ''; return; }
+  el.style.color = nxt >= cur ? 'var(--green)' : 'var(--amber)';
+  el.textContent = `New budget → ${PRISM.fmt(nxt)}`;
+}
+
+async function submitBudget() {
+  const id  = document.getElementById('bm-id').value;
+  const amt = parseInt(document.getElementById('bm-amount').value);
+  if (isNaN(amt)) return PRISM.toast('Enter an amount', 'error');
+  const res = await PRISM.api('PATCH', `/api/teams/${id}/budget`, { amount: amt, mode: _budMode });
+  if (res.success) {
+    PRISM.toast(`Budget → ${PRISM.fmt(res.team.budget)}`, 'success');
+    closeModal('budget-modal');
+    PRISM.emit('state:request', {});
+  } else PRISM.toast(res.message || 'Error', 'error');
+}
+
+function renderActivity(log) {
+  if (!log) return;
+  document.getElementById('act-count').textContent = log.length;
+  document.getElementById('activity-list').innerHTML = log.map(ev => `
+    <li class="activity-item">
+      <div class="activity-emoji">${ev.emoji}</div>
+      <div class="activity-text">${ev.html}</div>
+      <div class="activity-time">${ev.time}</div>
+    </li>`).join('');
+}
+
+// ── ACTIONS ──
+function emit(event, data) { PRISM.emit(event, data); }
+
+function activateItem(id, e) {
+  e && e.stopPropagation();
+  PRISM.emit('admin:activate-item', { itemId: id });
+  PRISM.toast('Item activated', 'success');
+}
+
+function startTimer(s)  { PRISM.emit('admin:start-timer', { seconds: s }); timerMax = s; }
+function startCustomTimer() {
+  const s = parseInt(document.getElementById('custom-sec').value);
+  if (!s || s < 5) return PRISM.toast('Enter a valid duration', 'error');
+  startTimer(s);
+  document.getElementById('custom-sec').value = '';
+}
+
+function awardItem() {
+  if (!appState?.auction?.currentItem) return PRISM.toast('No active item', 'error');
+  if (!appState.auction.currentItem.current_leader) return PRISM.toast('No bids placed yet', 'error');
+  if (!confirm(`Award "${appState.auction.currentItem.name}" to the highest bidder?`)) return;
+  PRISM.emit('admin:award-item', {});
+}
+
+function confirmReset() {
+  if (!confirm('⚠️ RESET ALL? This clears all bids, scores, and won items. Cannot be undone.')) return;
+  PRISM.emit('admin:reset-all', {});
+  PRISM.toast('Session reset', 'info');
+}
+
+function resetItem(id, e) {
+  e && e.stopPropagation();
+  if (!confirm('Reset this item?')) return;
+  PRISM.emit('admin:reset-item', { itemId: id });
+}
+
+async function deleteItem(id, e) {
+  e && e.stopPropagation();
+  if (!confirm('Delete this item permanently?')) return;
+  const r = await PRISM.del(`/api/items/${id}`);
+  if (r.success) PRISM.toast('Item deleted', 'success');
+  else PRISM.toast(r.message || 'Error', 'error');
+}
+
+// ── ADD ITEM ──
+const ICONS = ['🎧','📷','📢','📽️','🔌','📓','💻','🎮','📱','⌚','🎁','🏆','🎯','🔬','🎨','🎤','📡','🚀'];
+let selectedIcon = '📦';
+
+function openAddItem() {
+  // Build icon picker
+  document.getElementById('icon-picker').innerHTML = ICONS.map(ic =>
+    `<div class="icon-opt ${ic === selectedIcon ? 'selected' : ''}" onclick="selectIcon('${ic}',this)">${ic}</div>`
+  ).join('');
+  document.getElementById('new-item-name').value  = '';
+  document.getElementById('new-item-desc').value  = '';
+  document.getElementById('new-item-price').value = '';
+  document.getElementById('new-item-icon').value  = selectedIcon;
+  openModal('add-item-modal');
+}
+
+function selectIcon(ic, el) {
+  selectedIcon = ic;
+  document.querySelectorAll('.icon-opt').forEach(e => e.classList.remove('selected'));
+  el.classList.add('selected');
+  document.getElementById('new-item-icon').value = ic;
+}
+
+async function submitAddItem() {
+  const name      = document.getElementById('new-item-name').value.trim();
+  const desc      = document.getElementById('new-item-desc').value.trim();
+  const price     = parseInt(document.getElementById('new-item-price').value);
+  const icon      = document.getElementById('new-item-icon').value.trim() || '📦';
+
+  if (!name)        return PRISM.toast('Item name is required', 'error');
+  if (!price || price < 1) return PRISM.toast('Enter a valid base price', 'error');
+
+  const r = await PRISM.post('/api/items', { name, description: desc, icon, base_price: price });
+  if (r.success) {
+    PRISM.toast(`"${name}" added successfully!`, 'success');
+    closeModal('add-item-modal');
+    // Refresh state
+    PRISM.emit('state:request', {});
+  } else {
+    PRISM.toast(r.message || 'Failed to add item', 'error');
+  }
+}
+
+// ── EDIT ITEM ──
+function openEditItem(id, e) {
+  e && e.stopPropagation();
+  const item = appState?.items?.find(i => i.id === id);
+  if (!item) return;
+  document.getElementById('edit-item-id').value    = id;
+  document.getElementById('edit-item-name').value  = item.name;
+  document.getElementById('edit-item-desc').value  = item.description || '';
+  document.getElementById('edit-item-price').value = item.base_price;
+  document.getElementById('edit-item-icon').value  = item.icon || '📦';
+  openModal('edit-item-modal');
+}
+
+async function submitEditItem() {
+  const id    = parseInt(document.getElementById('edit-item-id').value);
+  const name  = document.getElementById('edit-item-name').value.trim();
+  const desc  = document.getElementById('edit-item-desc').value.trim();
+  const price = parseInt(document.getElementById('edit-item-price').value);
+  const icon  = document.getElementById('edit-item-icon').value.trim() || '📦';
+
+  if (!name || !price) return PRISM.toast('Name and price required', 'error');
+
+  const r = await PRISM.put(`/api/items/${id}`, { name, description: desc, icon, base_price: price });
+  if (r.success) {
+    PRISM.toast('Item updated', 'success');
+    closeModal('edit-item-modal');
+    PRISM.emit('state:request', {});
+  } else {
+    PRISM.toast(r.message || 'Error', 'error');
+  }
+}
+
+// ── MODAL HELPERS ──
+function openModal(id)  { document.getElementById(id).classList.add('open'); }
+function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+
+// Close on backdrop click
+document.querySelectorAll('.modal-overlay').forEach(overlay => {
+  overlay.addEventListener('click', e => {
+    if (e.target === overlay) closeModal(overlay.id);
+  });
+});
+
+// Enter key submit
+document.getElementById('new-item-price').addEventListener('keydown', e => {
+  if (e.key === 'Enter') submitAddItem();
+});
+
+function toggleAdminSound() {
+  const on = SOUNDS.toggle();
+  document.getElementById('sound-btn').textContent = on ? '🔊' : '🔇';
+}
+
+async function doLogout() {
+  await PRISM.post('/api/auth/logout');
+  location.href = '/';
+}
+
+// Health check for connections count
+setInterval(async () => {
+  const r = await PRISM.get('/api/health').catch(() => null);
+  if (r) document.getElementById('ss-conn').textContent = r.connections || '—';
+}, 5000);
+</script>
+</body>
+</html>

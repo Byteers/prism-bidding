@@ -1,0 +1,840 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
+<title>PRism — Team Dashboard</title>
+<link rel="stylesheet" href="/assets/css/base.css">
+<script src="/socket.io/socket.io.js"></script>
+<script src="/assets/js/sounds.js"></script>
+<script src="/assets/js/prism.js"></script>
+<style>
+/* ── TEAM THEME ── injected by JS based on team color */
+:root { --team-color: #3b82f6; --team-dim: rgba(59,130,246,0.12); }
+
+body { overflow-x: hidden; }
+
+/* ── TOP BAR ── */
+.team-topbar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 20px; position: sticky; top: 0; z-index: 100;
+  background: rgba(10,11,15,.95); backdrop-filter: blur(20px);
+  border-bottom: 1px solid var(--border);
+}
+.team-identity { display: flex; align-items: center; gap: 12px; }
+.team-avatar {
+  width: 36px; height: 36px; border-radius: 9px;
+  background: var(--team-dim); border: 2px solid var(--team-color);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 1.1rem; font-weight: 900; font-family: var(--font-d);
+  color: var(--team-color); letter-spacing: 1px;
+  box-shadow: 0 0 14px color-mix(in srgb, var(--team-color) 30%, transparent);
+  transition: box-shadow .3s;
+}
+.team-name-label { font-size: .6rem; font-family: var(--font-mono); color: var(--text3); letter-spacing: 2px; text-transform: uppercase; }
+.team-name-val   { font-weight: 700; font-size: .9rem; margin-top: 1px; }
+.topbar-right    { display: flex; align-items: center; gap: 10px; }
+
+/* ── BUDGET BANNER ── */
+.budget-banner {
+  padding: 16px 20px;
+  background: linear-gradient(135deg, rgba(10,11,15,0) 0%, color-mix(in srgb, var(--team-color) 4%, transparent) 100%);
+  border-bottom: 1px solid var(--border);
+  position: relative; overflow: hidden;
+}
+.budget-banner::before {
+  content: ''; position: absolute; right: -60px; top: -60px;
+  width: 200px; height: 200px;
+  background: radial-gradient(circle, color-mix(in srgb, var(--team-color) 8%, transparent), transparent 65%);
+  pointer-events: none;
+}
+.budget-row { display: flex; align-items: flex-end; gap: 6px; margin-bottom: 10px; }
+.budget-val {
+  font-family: var(--font-d); font-size: 2.8rem; letter-spacing: 2px;
+  color: var(--team-color); line-height: 1;
+  text-shadow: 0 0 30px color-mix(in srgb, var(--team-color) 40%, transparent);
+  transition: all .4s ease;
+}
+.budget-label { font-family: var(--font-mono); font-size: .6rem; color: var(--text3); letter-spacing: 2px; margin-bottom: 6px; }
+.budget-bar   { height: 4px; background: rgba(255,255,255,.05); border-radius: 3px; overflow: hidden; }
+.budget-bar-fill {
+  height: 100%; border-radius: 3px;
+  background: var(--team-color);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--team-color) 50%, transparent);
+  transition: width .9s cubic-bezier(.4,0,.2,1);
+}
+.budget-stats { display: flex; gap: 20px; margin-top: 8px; }
+.budget-stat  { display: flex; flex-direction: column; gap: 2px; }
+.budget-stat-label { font-family: var(--font-mono); font-size: .53rem; letter-spacing: 2px; color: var(--text3); text-transform: uppercase; }
+.budget-stat-val   { font-family: var(--font-mono); font-size: .78rem; color: var(--text); }
+
+/* ── MAIN CONTENT ── */
+.team-body { padding: 16px 20px; display: flex; flex-direction: column; gap: 16px; max-width: 540px; margin: 0 auto; }
+
+/* ── AUCTION STATUS PILL ── */
+.auction-pill {
+  display: flex; align-items: center; justify-content: space-between;
+  background: var(--bg2); border: 1px solid var(--border);
+  border-radius: 100px; padding: 10px 18px;
+  font-family: var(--font-mono); font-size: .65rem;
+  transition: all .3s;
+}
+.auction-pill.active { border-color: rgba(34,197,94,.3); background: rgba(34,197,94,.04); }
+.auction-pill.paused { border-color: rgba(245,158,11,.3); background: rgba(245,158,11,.04); }
+.auction-pill.ended  { border-color: rgba(239,68,68,.3);  background: rgba(239,68,68,.04);  }
+.pill-left { display: flex; align-items: center; gap: 10px; }
+.pill-dot  { width: 7px; height: 7px; border-radius: 50%; background: var(--text3); }
+.pill-dot.live { background: var(--green); box-shadow: 0 0 8px var(--green); animation: ws-pulse 1.5s infinite; }
+.pill-dot.paused { background: var(--amber); }
+.pill-dot.ended  { background: var(--red); }
+.pill-status { letter-spacing: 2px; text-transform: uppercase; color: var(--text2); }
+.pill-right { color: var(--text3); font-size: .6rem; }
+
+/* ── BID ARENA ── */
+.bid-arena {
+  background: var(--bg2); border: 1px solid var(--border);
+  border-radius: 20px; overflow: hidden;
+  transition: border-color .4s, box-shadow .4s;
+  position: relative;
+}
+.bid-arena.live {
+  border-color: color-mix(in srgb, var(--team-color) 30%, transparent);
+  box-shadow: 0 0 40px color-mix(in srgb, var(--team-color) 6%, transparent);
+}
+
+/* Item display */
+.arena-item {
+  padding: 24px 22px 18px; text-align: center;
+  position: relative;
+}
+.arena-item::before {
+  content: ''; position: absolute; top: 0; left: 0; right: 0; height: 1px;
+  background: linear-gradient(90deg, transparent, var(--team-color), transparent);
+  opacity: 0; transition: opacity .5s;
+}
+.bid-arena.live .arena-item::before { opacity: .6; }
+
+.arena-icon { font-size: 3rem; display: block; margin-bottom: 12px; animation: float 3s ease infinite; }
+@keyframes float { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-6px)} }
+.arena-name { font-size: 1.15rem; font-weight: 700; margin-bottom: 4px; }
+.arena-desc { font-size: .75rem; color: var(--text3); margin-bottom: 20px; }
+
+/* Current bid display */
+.arena-bid {
+  font-family: var(--font-d); font-size: 3.8rem; letter-spacing: 3px;
+  color: var(--amber); line-height: 1;
+  text-shadow: 0 0 40px rgba(245,158,11,.25);
+  transition: all .35s;
+  margin-bottom: 6px;
+}
+.arena-bid.bump { animation: bid-bump .4s cubic-bezier(.175,.885,.32,1.275); }
+@keyframes bid-bump {
+  0%  { transform: scale(1);    color: var(--amber); }
+  40% { transform: scale(1.08); color: var(--green); }
+  100%{ transform: scale(1);    color: var(--amber); }
+}
+.arena-bid-label { font-family: var(--font-mono); font-size: .58rem; letter-spacing: 2px; color: var(--text3); margin-bottom: 16px; }
+
+/* Leader tag */
+.leader-tag {
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 6px 14px; border-radius: 100px;
+  background: rgba(255,255,255,.04); border: 1px solid var(--border);
+  font-family: var(--font-mono); font-size: .65rem;
+  transition: all .3s; margin-bottom: 20px;
+}
+.leader-tag.is-you {
+  background: color-mix(in srgb, var(--team-color) 12%, transparent);
+  border-color: color-mix(in srgb, var(--team-color) 35%, transparent);
+  color: var(--team-color);
+}
+.leader-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+
+/* Bid input section */
+.arena-input { padding: 0 22px 22px; }
+.bid-input-wrap {
+  display: flex; gap: 10px; align-items: stretch;
+  background: var(--bg3); border: 1px solid var(--border2);
+  border-radius: 14px; padding: 8px 8px 8px 18px;
+  transition: border-color .2s, box-shadow .2s;
+}
+.bid-input-wrap:focus-within {
+  border-color: var(--team-color);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--team-color) 15%, transparent);
+}
+.bid-currency { font-family: var(--font-d); font-size: 1.5rem; color: var(--text3); display: flex; align-items: center; }
+.bid-input {
+  flex: 1; background: none; border: none; outline: none;
+  font-family: var(--font-d); font-size: 2rem; letter-spacing: 1px;
+  color: var(--text); min-width: 0;
+}
+.bid-input::placeholder { color: var(--text3); }
+.bid-input::-webkit-outer-spin-button,
+.bid-input::-webkit-inner-spin-button { -webkit-appearance: none; }
+.bid-submit {
+  background: var(--team-color);
+  border: none; border-radius: 10px; cursor: pointer;
+  padding: 12px 18px; font-family: var(--font-mono); font-size: .7rem;
+  font-weight: 700; letter-spacing: 1px; color: #fff;
+  transition: all .2s; white-space: nowrap;
+  box-shadow: 0 0 20px color-mix(in srgb, var(--team-color) 30%, transparent);
+}
+.bid-submit:hover:not(:disabled) {
+  transform: scale(1.03);
+  box-shadow: 0 0 30px color-mix(in srgb, var(--team-color) 50%, transparent);
+}
+.bid-submit:active:not(:disabled) { transform: scale(.97); }
+.bid-submit:disabled { opacity: .4; cursor: not-allowed; box-shadow: none; }
+
+.bid-hint { font-family: var(--font-mono); font-size: .62rem; color: var(--text3); margin-top: 10px; text-align: center; }
+.bid-hint .min-val { color: var(--text2); }
+
+/* Quick bid buttons */
+.quick-bids { display: flex; gap: 8px; justify-content: center; margin-top: 14px; flex-wrap: wrap; }
+.quick-bid-btn {
+  font-family: var(--font-mono); font-size: .63rem; letter-spacing: 1px;
+  padding: 7px 14px; border-radius: 20px; cursor: pointer;
+  background: var(--bg3); border: 1px solid var(--border2); color: var(--text2);
+  transition: all .18s;
+}
+.quick-bid-btn:hover:not(:disabled) {
+  border-color: var(--team-color); color: var(--team-color);
+  background: color-mix(in srgb, var(--team-color) 10%, transparent);
+}
+.quick-bid-btn:disabled { opacity: .3; cursor: not-allowed; }
+
+/* Waiting state */
+.arena-waiting {
+  padding: 50px 22px; text-align: center;
+  display: flex; flex-direction: column; align-items: center; gap: 14px;
+}
+.waiting-icon { font-size: 2.5rem; animation: float 3s ease infinite; }
+.waiting-title { font-size: 1rem; font-weight: 700; color: var(--text2); }
+.waiting-sub   { font-family: var(--font-mono); font-size: .65rem; color: var(--text3); line-height: 1.6; }
+
+/* ── TIMER ── */
+.timer-card {
+  background: var(--bg2); border: 1px solid var(--border);
+  border-radius: 16px; padding: 18px 20px;
+  display: flex; align-items: center; gap: 18px;
+  transition: border-color .3s;
+}
+.timer-card.urgent { border-color: rgba(239,68,68,.35); background: rgba(239,68,68,.03); }
+.timer-circle {
+  width: 64px; height: 64px; border-radius: 50%; flex-shrink: 0; position: relative;
+  display: flex; align-items: center; justify-content: center;
+}
+.timer-svg { position: absolute; inset: 0; transform: rotate(-90deg); }
+.timer-track { fill: none; stroke: rgba(255,255,255,.06); stroke-width: 4; }
+.timer-progress { fill: none; stroke-width: 4; stroke-linecap: round; transition: stroke-dashoffset 1s linear, stroke .5s; }
+.timer-num {
+  font-family: var(--font-d); font-size: 1.35rem; letter-spacing: 1px;
+  color: var(--text); z-index: 1; transition: color .3s;
+}
+.timer-num.urgent { color: var(--red); animation: timer-blink .6s ease infinite; }
+@keyframes timer-blink { 50% { opacity: .5; } }
+.timer-info { flex: 1; }
+.timer-label { font-family: var(--font-mono); font-size: .58rem; letter-spacing: 2px; color: var(--text3); text-transform: uppercase; margin-bottom: 4px; }
+.timer-status { font-size: .82rem; font-weight: 600; color: var(--text2); }
+.timer-subtext { font-family: var(--font-mono); font-size: .62rem; color: var(--text3); margin-top: 2px; }
+
+/* ── BID HISTORY ── */
+.history-card {
+  background: var(--bg2); border: 1px solid var(--border);
+  border-radius: 16px; overflow: hidden;
+}
+.history-header {
+  padding: 14px 18px; border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: space-between;
+  font-family: var(--font-mono); font-size: .6rem; letter-spacing: 2px; color: var(--text3); text-transform: uppercase;
+}
+.history-list { max-height: 220px; overflow-y: auto; }
+.history-item {
+  display: flex; align-items: center; gap: 12px;
+  padding: 11px 18px; border-bottom: 1px solid rgba(255,255,255,.03);
+  animation: slide-in .3s ease; transition: background .2s;
+}
+.history-item:hover { background: var(--bg3); }
+.history-item.mine  { background: color-mix(in srgb, var(--team-color) 4%, transparent); }
+.history-item.mine:hover { background: color-mix(in srgb, var(--team-color) 7%, transparent); }
+.h-avatar {
+  width: 28px; height: 28px; border-radius: 7px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: .65rem; font-weight: 900; font-family: var(--font-d);
+}
+.h-info { flex: 1; min-width: 0; }
+.h-team { font-size: .75rem; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.h-time { font-family: var(--font-mono); font-size: .58rem; color: var(--text3); }
+.h-amount { font-family: var(--font-mono); font-size: .8rem; color: var(--amber); font-weight: 700; }
+
+/* ── LEADERBOARD ── */
+.lb-card {
+  background: var(--bg2); border: 1px solid var(--border);
+  border-radius: 16px; overflow: hidden;
+}
+.lb-item {
+  display: flex; align-items: center; gap: 12px;
+  padding: 12px 18px; border-bottom: 1px solid rgba(255,255,255,.03);
+  transition: background .2s;
+}
+.lb-item.mine { background: color-mix(in srgb, var(--team-color) 5%, transparent); }
+.lb-rank { font-family: var(--font-d); font-size: 1.1rem; width: 24px; color: var(--text3); flex-shrink: 0; }
+.lb-rank.gold   { color: #f59e0b; }
+.lb-rank.silver { color: #94a3b8; }
+.lb-rank.bronze { color: #cd7f32; }
+.lb-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.lb-name { flex: 1; font-size: .82rem; font-weight: 600; }
+.lb-right { text-align: right; }
+.lb-spent { font-family: var(--font-mono); font-size: .72rem; color: var(--text2); }
+.lb-wins  { font-family: var(--font-mono); font-size: .58rem; color: var(--text3); }
+
+/* ── WINNER OVERLAY ── */
+.winner-overlay {
+  position: fixed; inset: 0; z-index: 400;
+  background: rgba(0,0,0,.85); backdrop-filter: blur(10px);
+  display: flex; align-items: center; justify-content: center;
+  opacity: 0; pointer-events: none; transition: opacity .4s;
+}
+.winner-overlay.show { opacity: 1; pointer-events: all; }
+.winner-box {
+  background: var(--bg2); border: 1px solid rgba(245,158,11,.3);
+  border-radius: 24px; padding: 40px 36px; text-align: center;
+  max-width: 340px; width: 90%;
+  box-shadow: 0 0 80px rgba(245,158,11,.15);
+  transform: scale(.9); transition: transform .4s cubic-bezier(.175,.885,.32,1.275);
+}
+.winner-overlay.show .winner-box { transform: scale(1); }
+.winner-icon { font-size: 3.5rem; display: block; margin-bottom: 16px; }
+.winner-headline { font-family: var(--font-d); font-size: 2.5rem; letter-spacing: 2px; color: var(--amber); margin-bottom: 6px; }
+.winner-item { font-size: 1rem; color: var(--text2); margin-bottom: 4px; }
+.winner-price{ font-family: var(--font-mono); font-size: 1.3rem; color: var(--green); margin-bottom: 24px; }
+.winner-you  { display: none; }
+.winner-you.visible { display: block; font-family: var(--font-d); font-size: 1.4rem; letter-spacing: 1px; color: var(--team-color); margin-bottom: 18px; }
+</style>
+</head>
+<body>
+<div class="page">
+
+<!-- TOPBAR -->
+<header class="team-topbar">
+  <div class="team-identity">
+    <div class="team-avatar" id="team-avatar">—</div>
+    <div>
+      <div class="team-name-label">Team Dashboard</div>
+      <div class="team-name-val" id="team-name-val">Loading...</div>
+    </div>
+  </div>
+  <div class="topbar-right">
+    <div class="ws-indicator">
+      <div class="ws-dot" id="ws-dot"></div>
+    </div>
+    <button class="btn btn-ghost btn-sm" id="sound-toggle" onclick="toggleSound()" title="Toggle sounds">🔊</button>
+    <button class="btn btn-ghost btn-sm" onclick="doLogout()">Exit</button>
+  </div>
+</header>
+
+<!-- BUDGET BANNER -->
+<div class="budget-banner">
+  <div class="budget-label">Available Budget</div>
+  <div class="budget-row">
+    <div class="budget-val" id="budget-val">₹—</div>
+  </div>
+  <div class="budget-bar">
+    <div class="budget-bar-fill" id="budget-bar" style="width:100%"></div>
+  </div>
+  <div class="budget-stats">
+    <div class="budget-stat">
+      <div class="budget-stat-label">Total Budget</div>
+      <div class="budget-stat-val" id="stat-budget">—</div>
+    </div>
+    <div class="budget-stat">
+      <div class="budget-stat-label">Spent</div>
+      <div class="budget-stat-val" id="stat-spent">—</div>
+    </div>
+    <div class="budget-stat">
+      <div class="budget-stat-label">Items Won</div>
+      <div class="budget-stat-val" id="stat-won">0</div>
+    </div>
+    <div class="budget-stat">
+      <div class="budget-stat-label">Rank</div>
+      <div class="budget-stat-val" id="stat-rank">—</div>
+    </div>
+  </div>
+</div>
+
+<!-- MAIN BODY -->
+<div class="team-body">
+
+  <!-- Auction status pill -->
+  <div class="auction-pill" id="auction-pill">
+    <div class="pill-left">
+      <div class="pill-dot" id="pill-dot"></div>
+      <div class="pill-status" id="pill-status">Waiting for auction...</div>
+    </div>
+    <div class="pill-right" id="pill-right">PRism Live</div>
+  </div>
+
+  <!-- TIMER -->
+  <div class="timer-card" id="timer-card">
+    <div class="timer-circle" id="timer-circle">
+      <svg class="timer-svg" viewBox="0 0 64 64">
+        <circle class="timer-track" cx="32" cy="32" r="28"/>
+        <circle class="timer-progress" id="timer-progress" cx="32" cy="32" r="28"
+          stroke="#3b82f6"
+          stroke-dasharray="175.9"
+          stroke-dashoffset="175.9"/>
+      </svg>
+      <div class="timer-num" id="timer-num">—</div>
+    </div>
+    <div class="timer-info">
+      <div class="timer-label">Countdown Timer</div>
+      <div class="timer-status" id="timer-status">Waiting to start</div>
+      <div class="timer-subtext" id="timer-subtext">Admin will start the timer</div>
+    </div>
+  </div>
+
+  <!-- BID ARENA -->
+  <div class="bid-arena" id="bid-arena">
+
+    <!-- Waiting state -->
+    <div class="arena-waiting" id="arena-waiting">
+      <div class="waiting-icon">⏳</div>
+      <div class="waiting-title">Waiting for next item</div>
+      <div class="waiting-sub">The admin will activate an item<br>and open bidding soon</div>
+    </div>
+
+    <!-- Active item state -->
+    <div id="arena-active" style="display:none">
+      <div class="arena-item">
+        <span class="arena-icon" id="arena-icon">📦</span>
+        <div class="arena-name" id="arena-name">—</div>
+        <div class="arena-desc" id="arena-desc">—</div>
+        <div class="arena-bid" id="arena-bid">₹0</div>
+        <div class="arena-bid-label">CURRENT HIGHEST BID</div>
+        <div class="leader-tag" id="leader-tag">
+          <div class="leader-dot"></div>
+          <span id="leader-text">No bids yet</span>
+        </div>
+      </div>
+      <div class="arena-input">
+        <div class="bid-input-wrap">
+          <div class="bid-currency">₹</div>
+          <input class="bid-input" type="number" id="bid-input" placeholder="0" />
+          <button class="bid-submit" id="bid-submit" onclick="placeBid()">BID NOW</button>
+        </div>
+        <div class="bid-hint" id="bid-hint">Min bid: <span class="min-val" id="min-bid-val">₹—</span></div>
+        <div class="quick-bids" id="quick-bids"></div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- BID HISTORY -->
+  <div class="history-card" id="history-card">
+    <div class="history-header">
+      <span>Recent Bids</span>
+      <span class="badge badge-ghost" id="bid-count">0 bids</span>
+    </div>
+    <div class="history-list" id="history-list">
+      <div style="padding:20px;text-align:center;color:var(--text3);font-family:var(--font-mono);font-size:.65rem">No bids yet</div>
+    </div>
+  </div>
+
+  <!-- LEADERBOARD -->
+  <div class="lb-card">
+    <div class="history-header">
+      <span>🏅 Leaderboard</span>
+    </div>
+    <div id="lb-list"></div>
+  </div>
+
+  <div style="height:20px"></div>
+</div>
+</div>
+
+<!-- WINNER OVERLAY -->
+<div class="winner-overlay" id="winner-overlay">
+  <div class="winner-box">
+    <span class="winner-icon">🏆</span>
+    <div class="winner-headline">SOLD!</div>
+    <div class="winner-item" id="winner-item">—</div>
+    <div class="winner-price" id="winner-price">—</div>
+    <div class="winner-you" id="winner-you">🎉 It's yours!</div>
+    <button class="btn btn-ghost btn-full" onclick="closeWinner()">Continue</button>
+  </div>
+</div>
+
+<div id="toast"></div>
+<canvas id="confetti"></canvas>
+
+<script>
+// ── TEAM STATE ──
+let myTeamId   = null;
+let myColor    = '#3b82f6';
+let myBudget   = 50000;
+let mySpent    = 0;
+let appState   = null;
+let timerMax   = 60;
+let bidHistory = [];
+
+// ── AUTH CHECK ──
+PRISM.get('/api/auth/me').then(me => {
+  if (me.role !== 'team') { location.href = '/'; return; }
+  myTeamId = me.teamId;
+  myColor  = me.color || '#3b82f6';
+
+  // Inject team color
+  document.documentElement.style.setProperty('--team-color', myColor);
+  document.documentElement.style.setProperty('--team-dim', hexToRgba(myColor, .12));
+
+  // Set identity
+  document.getElementById('team-avatar').textContent    = me.teamName.slice(0,2).toUpperCase();
+  document.getElementById('team-name-val').textContent  = me.teamName;
+  document.getElementById('stat-budget').textContent    = PRISM.fmt(me.budget);
+  myBudget = me.budget;
+
+  // Timer progress color
+  document.getElementById('timer-progress').style.stroke = myColor;
+
+  PRISM.connect();
+  setupSocket();
+});
+
+function hexToRgba(hex, a) {
+  const r = parseInt(hex.slice(1,3),16);
+  const g = parseInt(hex.slice(3,5),16);
+  const b = parseInt(hex.slice(5,7),16);
+  return `rgba(${r},${g},${b},${a})`;
+}
+
+function setupSocket() {
+  PRISM.socket.on('connect',    () => updateWs(true));
+  PRISM.socket.on('disconnect', () => updateWs(false));
+}
+
+function updateWs(on) {
+  const dot = document.getElementById('ws-dot');
+  if (dot) dot.className = 'ws-dot' + (on ? ' connected' : '');
+}
+
+// ── STATE UPDATES ──
+window.onStateUpdate = function(s) {
+  appState = s;
+  const me = s.teams.find(t => t.id === myTeamId);
+  if (me) updateMyStats(me, s);
+  updateAuctionPill(s.auction.status);
+  updateArena(s);
+  renderLeaderboard(s.leaderboard);
+  if (s.auction.currentItemId) loadBidHistory(s.auction.currentItemId);
+};
+
+function updateMyStats(me, s) {
+  mySpent = me.total_spent || 0;
+  const remaining = me.budget - mySpent;
+  document.getElementById('budget-val').textContent  = PRISM.fmt(remaining);
+  document.getElementById('stat-spent').textContent  = PRISM.fmt(mySpent);
+  document.getElementById('stat-budget').textContent = PRISM.fmt(me.budget);
+
+  // Items won
+  const won = s.items.filter(i => i.winner_id === myTeamId).length;
+  document.getElementById('stat-won').textContent = won;
+
+  // Budget bar
+  const pct = Math.max(0, Math.min(100, (remaining / me.budget) * 100));
+  document.getElementById('budget-bar').style.width = pct + '%';
+
+  // Rank
+  const rank = s.leaderboard.findIndex(t => t.id === myTeamId) + 1;
+  const medals = ['🥇','🥈','🥉'];
+  document.getElementById('stat-rank').textContent = medals[rank-1] || '#' + rank;
+}
+
+function updateAuctionPill(status) {
+  const pill   = document.getElementById('auction-pill');
+  const dot    = document.getElementById('pill-dot');
+  const label  = document.getElementById('pill-status');
+  const right  = document.getElementById('pill-right');
+
+  pill.className = 'auction-pill ' + status;
+  dot.className  = 'pill-dot ' + (status === 'active' ? 'live' : status);
+
+  const labels = {
+    idle:   ['Waiting for auction to start', 'Stand by'],
+    active: ['Auction is LIVE', '🔴 Live'],
+    paused: ['Auction paused', '⏸ Paused'],
+    ended:  ['Auction has ended', 'Final'],
+  };
+  const [l, r] = labels[status] || ['—', '—'];
+  label.textContent = l;
+  right.textContent = r;
+}
+
+function updateArena(s) {
+  const item    = s.auction.currentItem;
+  const waiting = document.getElementById('arena-waiting');
+  const active  = document.getElementById('arena-active');
+  const arena   = document.getElementById('bid-arena');
+
+  if (!item || item.status !== 'live') {
+    waiting.style.display = 'flex';
+    active.style.display  = 'none';
+    arena.classList.remove('live');
+    bidHistory = [];
+    renderBidHistory([]);
+    return;
+  }
+
+  waiting.style.display = 'none';
+  active.style.display  = 'block';
+  arena.classList.add('live');
+
+  document.getElementById('arena-icon').textContent = item.icon || '📦';
+  document.getElementById('arena-name').textContent = item.name;
+  document.getElementById('arena-desc').textContent = item.description || '';
+
+  const currentBid = item.current_bid || item.base_price;
+  const bidEl = document.getElementById('arena-bid');
+  const newBidText = PRISM.fmt(currentBid);
+  if (bidEl.textContent !== newBidText) {
+    bidEl.textContent = newBidText;
+    bidEl.classList.remove('bump');
+    void bidEl.offsetWidth;
+    bidEl.classList.add('bump');
+  }
+
+  // Leader
+  const leader    = item.current_leader ? s.teams.find(t => t.id === item.current_leader) : null;
+  const leaderTag = document.getElementById('leader-tag');
+  const leaderTxt = document.getElementById('leader-text');
+  const isMe      = item.current_leader === myTeamId;
+
+  leaderTag.className = 'leader-tag' + (isMe ? ' is-you' : '');
+  leaderTxt.textContent = isMe ? '✓ You are leading!' : (leader ? leader.name + ' is leading' : 'No bids yet');
+
+  // Min bid + quick bids
+  const minBid = currentBid + 100;
+  document.getElementById('min-bid-val').textContent = PRISM.fmt(minBid);
+
+  // Auto-fill if empty or too low
+  const bidInput = document.getElementById('bid-input');
+  if (!bidInput.value || parseInt(bidInput.value) < minBid) {
+    bidInput.value = minBid;
+  }
+
+  // Quick bid buttons
+  const me = s.teams.find(t => t.id === myTeamId);
+  const remaining = me ? me.budget - (me.total_spent || 0) : 0;
+  const quicks = [minBid, minBid+500, minBid+1000, minBid+2500].filter(v => v <= remaining);
+  document.getElementById('quick-bids').innerHTML = quicks.map(v =>
+    `<button class="quick-bid-btn" onclick="quickBid(${v})">${PRISM.fmt(v)}</button>`
+  ).join('') + (remaining < minBid ? '<span style="font-family:var(--font-mono);font-size:.62rem;color:var(--red)">Insufficient budget</span>' : '');
+
+  // Submit button state
+  const canBid = s.auction.status === 'active' && s.timer.running && !isMe;
+  document.getElementById('bid-submit').disabled = !canBid;
+
+  // Hint
+  const hintEl = document.getElementById('bid-hint');
+  if (!s.timer.running) hintEl.innerHTML = '<span style="color:var(--amber)">⏸ Wait for timer to start</span>';
+  else if (isMe) hintEl.innerHTML = '<span style="color:var(--green)">✓ You are the highest bidder</span>';
+  else hintEl.innerHTML = `Min bid: <span class="min-val">${PRISM.fmt(minBid)}</span>`;
+}
+
+function updateTimer(d) {
+  const num      = document.getElementById('timer-num');
+  const progress = document.getElementById('timer-progress');
+  const card     = document.getElementById('timer-card');
+  const status   = document.getElementById('timer-status');
+  const subtext  = document.getElementById('timer-subtext');
+
+  timerMax = Math.max(timerMax, d.max || timerMax);
+
+  if (d.value === 0 && !d.running) {
+    num.textContent    = '—';
+    num.className      = 'timer-num';
+    progress.style.strokeDashoffset = '175.9';
+    card.classList.remove('urgent');
+    status.textContent  = 'Timer stopped';
+    subtext.textContent = 'Waiting for admin';
+    return;
+  }
+
+  const isUrgent = d.value <= 10 && d.running;
+  num.textContent  = d.value;
+  num.className    = 'timer-num' + (isUrgent ? ' urgent' : '');
+  card.className   = 'timer-card' + (isUrgent ? ' urgent' : '');
+  progress.style.stroke = isUrgent ? 'var(--red)' : myColor;
+
+  const pct = timerMax > 0 ? d.value / timerMax : 0;
+  const circumference = 175.9;
+  progress.style.strokeDashoffset = circumference * (1 - pct);
+
+  status.textContent  = d.running ? `${d.value} seconds remaining` : 'Timer paused';
+  subtext.textContent = isUrgent ? 'BID NOW!' : (d.running ? 'Bidding is open' : '');
+
+  // Enable/disable bid button based on timer
+  const btn = document.getElementById('bid-submit');
+  if (btn && appState?.auction?.currentItem?.current_leader !== myTeamId) {
+    btn.disabled = !d.running || appState?.auction?.status !== 'active';
+  }
+}
+
+window.onTimerTick = (d) => {
+  if (d.running && d.value <= 10 && d.value > 0) SOUNDS.urgent();
+  updateTimer(d);
+};
+window.onTimerEnded = () => { SOUNDS.timerEnd();
+  
+  updateTimer({ value: 0, running: false, max: timerMax });
+  document.getElementById('bid-submit').disabled = true;
+  document.getElementById('quick-bids').querySelectorAll('button').forEach(b => b.disabled = true);
+};
+window.onAuctionEvent = (type) => {
+  updateAuctionPill(type === 'started' ? 'active' : type === 'resumed' ? 'active' : type);
+  if (type === 'paused' || type === 'ended') {
+    document.getElementById('bid-submit').disabled = true;
+  }
+};
+
+window.onBidNew = (d) => {
+  if (d.teamId === myTeamId) SOUNDS.bid(); else SOUNDS.tick();
+  if (d.teamId === myTeamId) {
+    PRISM.toast(`✅ Bid placed: ${PRISM.fmt(d.amount)}`, 'success', 2500);
+  } else {
+    PRISM.toast(`${d.teamName}: ${PRISM.fmt(d.amount)}`, 'info', 1800);
+  }
+  // Add to local history
+  bidHistory.unshift({
+    teamId: d.teamId, teamName: d.teamName,
+    teamColor: d.teamColor, amount: d.amount,
+    ts: new Date().toLocaleTimeString('en-IN', { hour:'2-digit', minute:'2-digit' }),
+  });
+  renderBidHistory(bidHistory);
+};
+
+window.onItemSold = (d) => {
+  const isMe = d.team?.id === myTeamId;
+  document.getElementById('winner-item').textContent  = d.item?.name || '—';
+  document.getElementById('winner-price').textContent = PRISM.fmt(d.amount);
+  const youEl = document.getElementById('winner-you');
+  youEl.className = 'winner-you' + (isMe ? ' visible' : '');
+  document.getElementById('winner-overlay').classList.add('show');
+  if (isMe) {
+    PRISM.confetti();
+    PRISM.toast('🎉 You won! Congratulations!', 'win', 5000);
+  } else {
+    PRISM.toast(`${d.team?.name} wins ${d.item?.name}`, 'info', 3000);
+  }
+  bidHistory = [];
+  renderBidHistory([]);
+  timerMax = 60;
+};
+
+window.onWinnerAnnounce = window.onItemSold;
+
+// ── BID ACTIONS ──
+function placeBid() {
+  const amount = parseInt(document.getElementById('bid-input').value);
+  if (!amount) return PRISM.toast('Enter a bid amount', 'error');
+
+  const btn = document.getElementById('bid-submit');
+  btn.disabled = true;
+  btn.textContent = '...';
+
+  PRISM.emit('team:bid', { amount }, (res) => {
+    btn.textContent = 'BID NOW';
+    if (!res.success) {
+      PRISM.toast(res.message, 'error', 3000);
+      btn.disabled = false;
+    }
+    // On success, state update will re-enable/disable correctly
+  });
+}
+
+function quickBid(amount) {
+  document.getElementById('bid-input').value = amount;
+  placeBid();
+}
+
+document.getElementById('bid-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter') placeBid();
+});
+
+// ── BID HISTORY ──
+async function loadBidHistory(itemId) {
+  if (!itemId) return;
+  const bids = await PRISM.get(`/api/bids/${itemId}`).catch(() => []);
+  if (!Array.isArray(bids)) return;
+  bidHistory = bids.map(b => ({
+    teamId: b.team_id, teamName: b.team_name || b.team_id,
+    teamColor: appState?.teams.find(t => t.id === b.team_id)?.color || '#3b82f6',
+    amount: b.amount,
+    ts: new Date(b.timestamp).toLocaleTimeString('en-IN', { hour:'2-digit', minute:'2-digit' }),
+  })).reverse();
+  renderBidHistory(bidHistory);
+}
+
+function renderBidHistory(bids) {
+  const list = document.getElementById('history-list');
+  const count = document.getElementById('bid-count');
+  count.textContent = bids.length + ' bid' + (bids.length !== 1 ? 's' : '');
+
+  if (!bids.length) {
+    list.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text3);font-family:var(--font-mono);font-size:.65rem">No bids yet</div>';
+    return;
+  }
+
+  list.innerHTML = bids.slice(0, 20).map((b, i) => {
+    const isMe = b.teamId === myTeamId;
+    const initials = (b.teamName || '?').slice(0,2).toUpperCase();
+    return `
+    <div class="history-item ${isMe ? 'mine' : ''}">
+      <div class="h-avatar" style="background:${b.teamColor}22;color:${b.teamColor};border:1px solid ${b.teamColor}44">${initials}</div>
+      <div class="h-info">
+        <div class="h-team">${isMe ? '✓ You' : b.teamName} ${i === 0 ? '<span style="font-size:.55rem;color:var(--green);font-family:var(--font-mono)">LEADING</span>' : ''}</div>
+        <div class="h-time">${b.ts}</div>
+      </div>
+      <div class="h-amount">${PRISM.fmt(b.amount)}</div>
+    </div>`;
+  }).join('');
+}
+
+// ── LEADERBOARD ──
+function renderLeaderboard(lb) {
+  if (!lb) return;
+  const rankClass = ['gold','silver','bronze'];
+  document.getElementById('lb-list').innerHTML = lb.map((t, i) => `
+    <div class="lb-item ${t.id === myTeamId ? 'mine' : ''}">
+      <div class="lb-rank ${rankClass[i] || ''}">${i < 3 ? ['🥇','🥈','🥉'][i] : (i+1)}</div>
+      <div class="lb-dot" style="background:${t.color}; box-shadow:0 0 6px ${t.color}60"></div>
+      <div class="lb-name">${t.name} ${t.id === myTeamId ? '<span style="font-size:.55rem;color:var(--team-color);font-family:var(--font-mono)">(you)</span>' : ''}</div>
+      <div class="lb-right">
+        <div class="lb-spent">${PRISM.fmt(t.totalSpent)}</div>
+        <div class="lb-wins">${t.itemsWon} won</div>
+      </div>
+    </div>`).join('');
+}
+
+// ── WINNER OVERLAY ──
+function closeWinner() {
+  document.getElementById('winner-overlay').classList.remove('show');
+}
+
+// ── MISC ──
+async function doLogout() {
+  await PRISM.post('/api/auth/logout');
+  location.href = '/';
+}
+
+function toggleSound() {
+  const on = SOUNDS.toggle();
+  document.getElementById('sound-toggle').textContent = on ? '🔊' : '🔇';
+}
+
+// Prevent double-tap zoom on bid button
+document.getElementById('bid-submit').addEventListener('touchend', e => {
+  e.preventDefault(); placeBid();
+}, { passive: false });
+</script>
+</body>
+</html>

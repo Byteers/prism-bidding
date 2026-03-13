@@ -1,0 +1,707 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PRism — Live Display</title>
+<link rel="stylesheet" href="/assets/css/base.css">
+<script src="/assets/js/sounds.js"></script>
+<script src="/socket.io/socket.io.js"></script>
+<script src="/assets/js/prism.js"></script>
+<style>
+/* ── RESET & BASE ── */
+html, body { height: 100%; overflow: hidden; }
+body { background: #07080d; }
+body::before { display: none; }
+
+/* ── SCANLINE TEXTURE ── */
+body::after {
+  content: '';
+  position: fixed; inset: 0; z-index: 1; pointer-events: none;
+  background: repeating-linear-gradient(
+    0deg,
+    rgba(0,0,0,.03) 0px,
+    rgba(0,0,0,.03) 1px,
+    transparent 1px,
+    transparent 3px
+  );
+}
+
+/* ── AMBIENT GLOW ── */
+.ambient {
+  position: fixed; inset: 0; z-index: 0; pointer-events: none;
+  transition: background 2s ease;
+}
+
+/* ── LAYOUT ── */
+.display-wrap {
+  position: relative; z-index: 2;
+  height: 100vh; display: grid;
+  grid-template-rows: auto 1fr auto;
+  padding: 0;
+}
+
+/* ── TOP BAR ── */
+.d-topbar {
+  display: grid; grid-template-columns: 1fr auto 1fr;
+  align-items: center; padding: 18px 40px;
+  border-bottom: 1px solid rgba(255,255,255,.05);
+  background: rgba(7,8,13,.8); backdrop-filter: blur(20px);
+}
+.d-logo {
+  font-family: var(--font-d); font-size: 1.9rem; letter-spacing: 4px;
+  background: linear-gradient(135deg, var(--blue), #60a5fa);
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+}
+.d-logo span { -webkit-text-fill-color: var(--amber); }
+.d-center { text-align: center; }
+.d-event-name {
+  font-family: var(--font-mono); font-size: .62rem;
+  letter-spacing: 4px; color: var(--text3); text-transform: uppercase;
+}
+.d-right { display: flex; align-items: center; justify-content: flex-end; gap: 20px; }
+.live-badge {
+  display: flex; align-items: center; gap: 7px;
+  background: rgba(239,68,68,.1); border: 1px solid rgba(239,68,68,.3);
+  padding: 6px 14px; border-radius: 100px;
+  font-family: var(--font-mono); font-size: .65rem; color: var(--red);
+  letter-spacing: 2px;
+}
+.live-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--red); animation: ws-pulse 1.2s infinite; }
+
+/* ── MAIN STAGE ── */
+.d-stage {
+  display: grid; grid-template-columns: 1fr 380px;
+  gap: 0; min-height: 0;
+}
+@media(max-width:1100px) { .d-stage { grid-template-columns: 1fr 320px; } }
+
+/* ── CENTER STAGE ── */
+.d-main {
+  display: flex; flex-direction: column; align-items: center;
+  justify-content: center; padding: 30px 50px;
+  border-right: 1px solid rgba(255,255,255,.05);
+  position: relative;
+}
+
+/* Idle screen */
+.d-idle {
+  text-align: center; display: flex; flex-direction: column;
+  align-items: center; gap: 20px;
+}
+.d-idle-logo {
+  font-family: var(--font-d); font-size: clamp(6rem,14vw,10rem);
+  letter-spacing: 8px; line-height: .9;
+  background: linear-gradient(135deg, rgba(59,130,246,.4), rgba(245,158,11,.3));
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  animation: idle-pulse 4s ease infinite;
+}
+@keyframes idle-pulse { 0%,100%{opacity:.6} 50%{opacity:1} }
+.d-idle-sub {
+  font-family: var(--font-mono); font-size: .75rem; letter-spacing: 4px;
+  color: var(--text3); text-transform: uppercase; animation: idle-pulse 4s ease infinite .5s;
+}
+
+/* Item display */
+.d-item { text-align: center; width: 100%; }
+.d-item-icon {
+  font-size: clamp(4rem,8vw,6.5rem); display: block; margin-bottom: 20px;
+  animation: float-icon 3s ease infinite;
+  filter: drop-shadow(0 0 30px rgba(245,158,11,.3));
+}
+@keyframes float-icon {
+  0%,100% { transform: translateY(0) scale(1); }
+  50%      { transform: translateY(-12px) scale(1.04); }
+}
+.d-item-label {
+  font-family: var(--font-mono); font-size: .65rem; letter-spacing: 4px;
+  color: var(--text3); margin-bottom: 10px; text-transform: uppercase;
+}
+.d-item-name {
+  font-family: var(--font-d); font-size: clamp(2.5rem,6vw,4.5rem);
+  letter-spacing: 3px; line-height: 1; margin-bottom: 8px;
+  color: var(--text);
+}
+.d-item-desc {
+  font-family: var(--font-mono); font-size: .75rem; color: var(--text3);
+  margin-bottom: 40px;
+}
+
+/* Live bid */
+.d-bid-wrap { position: relative; }
+.d-bid-label {
+  font-family: var(--font-mono); font-size: .6rem; letter-spacing: 4px;
+  color: var(--text3); text-transform: uppercase; margin-bottom: 8px;
+}
+.d-bid {
+  font-family: var(--font-d);
+  font-size: clamp(4rem,10vw,8rem);
+  letter-spacing: 4px; line-height: 1;
+  color: var(--amber);
+  text-shadow: 0 0 60px rgba(245,158,11,.35);
+  transition: all .4s;
+}
+.d-bid.flash { animation: d-bid-flash .5s ease; }
+@keyframes d-bid-flash {
+  0%  { transform: scale(1);    color: var(--amber); text-shadow: 0 0 60px rgba(245,158,11,.35); }
+  30% { transform: scale(1.06); color: var(--green);  text-shadow: 0 0 80px rgba(34,197,94,.6); }
+  100%{ transform: scale(1);    color: var(--amber); text-shadow: 0 0 60px rgba(245,158,11,.35); }
+}
+
+/* Leader display */
+.d-leader {
+  display: flex; align-items: center; justify-content: center;
+  gap: 14px; margin-top: 20px; padding: 14px 28px;
+  background: rgba(255,255,255,.03); border: 1px solid rgba(255,255,255,.07);
+  border-radius: 100px; transition: all .5s;
+}
+.d-leader.has-leader {
+  background: rgba(255,255,255,.05);
+  border-color: rgba(255,255,255,.12);
+}
+.d-leader-dot { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; transition: background .4s, box-shadow .4s; }
+.d-leader-name {
+  font-family: var(--font-d); font-size: 1.8rem; letter-spacing: 2px;
+  color: var(--text2); transition: color .4s;
+}
+.d-leader.has-leader .d-leader-name { color: var(--text); }
+.d-leader-tag {
+  font-family: var(--font-mono); font-size: .58rem; letter-spacing: 2px;
+  color: var(--text3); border: 1px solid var(--border); padding: 3px 9px; border-radius: 4px;
+}
+
+/* ── TIMER ── */
+.d-timer-wrap { margin-top: 36px; display: flex; flex-direction: column; align-items: center; gap: 10px; }
+.d-timer-bar {
+  width: min(500px, 80vw); height: 6px;
+  background: rgba(255,255,255,.06); border-radius: 4px; overflow: hidden;
+}
+.d-timer-bar-fill {
+  height: 100%; border-radius: 4px;
+  background: linear-gradient(90deg, var(--blue), var(--green));
+  transition: width 1s linear, background 1s;
+  box-shadow: 0 0 12px rgba(59,130,246,.5);
+}
+.d-timer-bar-fill.urgent {
+  background: linear-gradient(90deg, var(--red), #ff7043);
+  box-shadow: 0 0 16px rgba(239,68,68,.6);
+  animation: urgent-pulse .6s ease infinite;
+}
+@keyframes urgent-pulse { 50%{ opacity:.6; } }
+.d-timer-num {
+  font-family: var(--font-d); font-size: 5rem; letter-spacing: 4px;
+  color: rgba(255,255,255,.15); line-height: 1; transition: color .4s;
+}
+.d-timer-num.running { color: rgba(255,255,255,.4); }
+.d-timer-num.urgent  { color: var(--red); animation: timer-blink .6s ease infinite; }
+@keyframes timer-blink { 50%{ opacity:.4; } }
+
+/* ── RIGHT SIDEBAR ── */
+.d-sidebar {
+  display: flex; flex-direction: column; gap: 0;
+  background: rgba(7,8,13,.6);
+}
+
+/* Leaderboard */
+.d-lb-title {
+  padding: 18px 24px 14px;
+  font-family: var(--font-mono); font-size: .6rem; letter-spacing: 3px;
+  color: var(--text3); text-transform: uppercase;
+  border-bottom: 1px solid rgba(255,255,255,.05);
+}
+.d-lb-item {
+  display: flex; align-items: center; gap: 14px;
+  padding: 14px 24px; border-bottom: 1px solid rgba(255,255,255,.04);
+  transition: background .4s, transform .4s;
+  position: relative; overflow: hidden;
+}
+.d-lb-item::before {
+  content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
+  background: var(--team-c, transparent); opacity: 0; transition: opacity .4s;
+}
+.d-lb-item.leader::before { opacity: 1; }
+.d-lb-rank {
+  font-family: var(--font-d); font-size: 1.4rem; width: 28px;
+  color: var(--text3); flex-shrink: 0; text-align: center;
+}
+.d-lb-dot {
+  width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0;
+  transition: box-shadow .4s;
+}
+.d-lb-dot.active { box-shadow: 0 0 10px var(--c, #3b82f6); }
+.d-lb-info { flex: 1; min-width: 0; }
+.d-lb-name { font-size: .9rem; font-weight: 700; margin-bottom: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.d-lb-bar  { height: 2px; background: rgba(255,255,255,.05); border-radius: 2px; overflow: hidden; }
+.d-lb-bar-fill { height: 100%; border-radius: 2px; transition: width .8s ease; }
+.d-lb-right { text-align: right; flex-shrink: 0; }
+.d-lb-spent { font-family: var(--font-mono); font-size: .72rem; color: var(--text2); }
+.d-lb-wins  { font-family: var(--font-mono); font-size: .55rem; color: var(--text3); margin-top: 2px; }
+
+/* Items list */
+.d-items-title {
+  padding: 14px 24px 10px;
+  font-family: var(--font-mono); font-size: .6rem; letter-spacing: 3px;
+  color: var(--text3); text-transform: uppercase;
+  border-top: 1px solid rgba(255,255,255,.05);
+  border-bottom: 1px solid rgba(255,255,255,.05);
+}
+.d-items-list { flex: 1; overflow-y: auto; }
+.d-items-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 24px; border-bottom: 1px solid rgba(255,255,255,.03);
+}
+.d-items-row.d-live { background: rgba(245,158,11,.04); }
+.d-items-row.d-sold { opacity: .45; }
+.d-items-icon { font-size: 1rem; width: 22px; text-align: center; flex-shrink: 0; }
+.d-items-name { flex: 1; font-size: .75rem; font-weight: 600; }
+.d-items-status { font-family: var(--font-mono); font-size: .58rem; }
+
+/* ── BOTTOM BAR ── */
+.d-bottombar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 40px; border-top: 1px solid rgba(255,255,255,.05);
+  background: rgba(7,8,13,.8);
+  font-family: var(--font-mono); font-size: .6rem; color: var(--text3);
+  letter-spacing: 1px;
+}
+.d-ticker { display: flex; align-items: center; gap: 16px; overflow: hidden; }
+.ticker-item { white-space: nowrap; transition: opacity .3s; }
+.ticker-item.won { color: var(--amber); }
+.ticker-sep { color: var(--text3); opacity: .4; }
+
+/* ── WINNER TAKEOVER ── */
+.winner-takeover {
+  position: fixed; inset: 0; z-index: 200;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  background: radial-gradient(ellipse at center, rgba(245,158,11,.12) 0%, rgba(7,8,13,.97) 60%);
+  opacity: 0; pointer-events: none;
+  transition: opacity .6s ease;
+}
+.winner-takeover.show { opacity: 1; pointer-events: all; }
+
+.wt-content { text-align: center; position: relative; z-index: 2; }
+.wt-sold {
+  font-family: var(--font-d); font-size: clamp(1.5rem,4vw,2.5rem);
+  letter-spacing: 6px; color: var(--text3);
+  margin-bottom: 16px; text-transform: uppercase;
+}
+.wt-team {
+  font-family: var(--font-d); font-size: clamp(4rem,12vw,9rem);
+  letter-spacing: 4px; line-height: .9;
+  margin-bottom: 10px;
+  animation: winner-reveal 1s cubic-bezier(.175,.885,.32,1.275) forwards;
+}
+@keyframes winner-reveal {
+  0%   { transform: scale(.7) translateY(20px); opacity: 0; }
+  100% { transform: scale(1)  translateY(0);    opacity: 1; }
+}
+.wt-item {
+  font-family: var(--font-mono); font-size: clamp(.8rem,2vw,1.2rem);
+  color: var(--text2); letter-spacing: 2px; margin-bottom: 6px;
+}
+.wt-price {
+  font-family: var(--font-d); font-size: clamp(2rem,5vw,3.5rem);
+  letter-spacing: 3px; color: var(--green);
+  text-shadow: 0 0 60px rgba(34,197,94,.5);
+}
+.wt-trophy { font-size: clamp(3rem,6vw,5rem); display: block; margin-bottom: 20px; animation: float-icon 2s ease infinite; }
+
+/* Particle ring */
+.wt-ring {
+  position: absolute; width: 500px; height: 500px;
+  border-radius: 50%; border: 1px solid rgba(245,158,11,.1);
+  top: 50%; left: 50%; transform: translate(-50%,-50%);
+  animation: ring-expand 2s ease-out infinite;
+}
+@keyframes ring-expand {
+  0%   { transform: translate(-50%,-50%) scale(.5); opacity: .8; }
+  100% { transform: translate(-50%,-50%) scale(2);  opacity: 0; }
+}
+
+/* ── PAUSED OVERLAY ── */
+.paused-banner {
+  position: fixed; bottom: 60px; left: 50%; transform: translateX(-50%);
+  background: rgba(245,158,11,.1); border: 1px solid rgba(245,158,11,.3);
+  padding: 12px 32px; border-radius: 100px;
+  font-family: var(--font-mono); font-size: .75rem; letter-spacing: 3px;
+  color: var(--amber); text-transform: uppercase;
+  opacity: 0; transition: opacity .4s; pointer-events: none; z-index: 50;
+}
+.paused-banner.show { opacity: 1; }
+</style>
+</head>
+<body>
+
+<div class="ambient" id="ambient"></div>
+<canvas id="confetti"></canvas>
+
+<div class="display-wrap page">
+
+  <!-- TOP BAR -->
+  <header class="d-topbar">
+    <div class="d-logo">PR<span>ism</span></div>
+    <div class="d-center">
+      <div class="d-event-name">Live Auction · College Edition</div>
+    </div>
+    <div class="d-right">
+      <div style="font-family:var(--font-mono);font-size:.65rem;color:var(--text3)" id="d-clock">—</div>
+      <button onclick="toggleSound()" id="d-sound-btn" style="background:none;border:none;cursor:pointer;font-size:1rem;opacity:.5;transition:opacity .2s" title="Toggle sound">🔊</button>
+      <div class="live-badge" id="live-badge">
+        <div class="live-dot"></div>
+        <span id="live-text">CONNECTING</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- STAGE -->
+  <div class="d-stage">
+
+    <!-- MAIN AREA -->
+    <main class="d-main">
+
+      <!-- IDLE -->
+      <div class="d-idle" id="d-idle">
+        <div class="d-idle-logo">PRism</div>
+        <div class="d-idle-sub">Live Auction — Waiting to Begin</div>
+      </div>
+
+      <!-- ACTIVE ITEM -->
+      <div class="d-item" id="d-item" style="display:none">
+        <div class="d-item-label">Now Bidding</div>
+        <span class="d-item-icon" id="d-item-icon">📦</span>
+        <div class="d-item-name" id="d-item-name">—</div>
+        <div class="d-item-desc" id="d-item-desc"></div>
+
+        <div class="d-bid-wrap">
+          <div class="d-bid-label">Current Bid</div>
+          <div class="d-bid" id="d-bid">₹0</div>
+        </div>
+
+        <div class="d-leader" id="d-leader">
+          <div class="d-leader-dot" id="d-leader-dot"></div>
+          <div class="d-leader-name" id="d-leader-name">No bids yet</div>
+          <div class="d-leader-tag">LEADING</div>
+        </div>
+
+        <div class="d-timer-wrap">
+          <div class="d-timer-bar">
+            <div class="d-timer-bar-fill" id="d-timer-bar" style="width:0%"></div>
+          </div>
+          <div class="d-timer-num" id="d-timer-num">—</div>
+        </div>
+      </div>
+
+    </main>
+
+    <!-- SIDEBAR -->
+    <aside class="d-sidebar">
+
+      <div class="d-lb-title">🏅 Leaderboard</div>
+      <div id="d-lb-list"></div>
+
+      <div class="d-items-title">📦 Items</div>
+      <div class="d-items-list" id="d-items-list"></div>
+
+    </aside>
+  </div>
+
+  <!-- BOTTOM BAR -->
+  <div class="d-bottombar">
+    <div class="d-ticker" id="d-ticker">
+      <span class="ticker-item" id="ticker-status">Auction not started</span>
+    </div>
+    <div style="display:flex;gap:24px;align-items:center">
+      <span id="d-teams-count" style="color:var(--text3)">— teams</span>
+      <span id="d-items-count" style="color:var(--text3)">— items</span>
+      <div class="ws-indicator">
+        <div class="ws-dot" id="ws-dot"></div>
+        <span class="ws-label" style="font-family:var(--font-mono);font-size:.58rem;color:var(--text3);letter-spacing:1px">OFFLINE</span>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- WINNER TAKEOVER -->
+<div class="winner-takeover" id="winner-takeover">
+  <div class="wt-ring"></div>
+  <div class="wt-ring" style="animation-delay:.4s"></div>
+  <div class="wt-ring" style="animation-delay:.8s"></div>
+  <div class="wt-content">
+    <span class="wt-trophy">🏆</span>
+    <div class="wt-sold">Sold to</div>
+    <div class="wt-team" id="wt-team">—</div>
+    <div class="wt-item" id="wt-item">—</div>
+    <div class="wt-price" id="wt-price">—</div>
+  </div>
+</div>
+
+<!-- PAUSED BANNER -->
+<div class="paused-banner" id="paused-banner">⏸ Auction Paused</div>
+
+<script>
+let appState  = null;
+let timerMax  = 60;
+let wonItems  = [];
+
+// ── CONNECT ──
+PRISM.connect();
+PRISM.socket.emit('display:join');
+
+PRISM.socket.on('connect',    () => { updateLive('LIVE'); updateWs(true); });
+PRISM.socket.on('disconnect', () => { updateLive('OFFLINE'); updateWs(false); });
+
+function updateLive(text) {
+  document.getElementById('live-text').textContent = text;
+  const badge = document.getElementById('live-badge');
+  badge.style.borderColor = text === 'LIVE' ? 'rgba(34,197,94,.4)' : 'rgba(239,68,68,.3)';
+  badge.style.color = text === 'LIVE' ? 'var(--green)' : 'var(--red)';
+  badge.style.background = text === 'LIVE' ? 'rgba(34,197,94,.08)' : 'rgba(239,68,68,.1)';
+  const dot = badge.querySelector('.live-dot');
+  if (dot) dot.style.background = text === 'LIVE' ? 'var(--green)' : 'var(--red)';
+}
+
+function updateWs(on) {
+  const dot = document.getElementById('ws-dot');
+  const lbl = document.querySelector('.ws-label');
+  if (dot) dot.className = 'ws-dot' + (on ? ' connected' : '');
+  if (lbl) lbl.textContent = on ? 'LIVE' : 'OFFLINE';
+}
+
+// ── CLOCK ──
+function updateClock() {
+  document.getElementById('d-clock').textContent =
+    new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true });
+}
+updateClock();
+setInterval(updateClock, 10000);
+
+function toggleSound() {
+  const on = SOUNDS.toggle();
+  document.getElementById('d-sound-btn').textContent = on ? '🔊' : '🔇';
+}
+
+
+// ── STATE ──
+window.onStateUpdate = function(s) {
+  appState = s;
+  renderStage(s);
+  renderSidebar(s);
+  renderBottomBar(s);
+  setAmbient(s);
+};
+
+window.onBidNew = function(d) {
+  SOUNDS.bid();
+  const el = document.getElementById('d-bid');
+  if (el) { el.classList.remove('flash'); void el.offsetWidth; el.classList.add('flash'); }
+};
+
+window.onTimerTick = function(d) {
+  if (d.running && d.value <= 10 && d.value > 0) SOUNDS.urgent();
+  timerMax = Math.max(timerMax, d.max || timerMax);
+  updateTimerDisplay(d.value, d.running);
+};
+
+window.onTimerEnded = function() { SOUNDS.timerEnd();
+  updateTimerDisplay(0, false);
+};
+
+window.onAuctionEvent = function(type) {
+  if (type === 'started' || type === 'resumed') SOUNDS.start();
+  const banner = document.getElementById('paused-banner');
+  banner.classList.toggle('show', type === 'paused');
+  if (type === 'reset') { wonItems = []; timerMax = 60; }
+};
+
+window.onItemSold = function(d) {
+  SOUNDS.winner();
+  showWinner(d);
+  if (d.item && d.team) {
+    wonItems.unshift({ item: d.item.name, team: d.team.name, amount: d.amount, color: d.team.color });
+    if (wonItems.length > 5) wonItems.pop();
+  }
+  timerMax = 60;
+};
+
+window.onWinnerAnnounce = window.onItemSold;
+
+// ── STAGE ──
+function renderStage(s) {
+  const idle    = document.getElementById('d-idle');
+  const itemEl  = document.getElementById('d-item');
+  const item    = s.auction.currentItem;
+
+  if (!item || item.status !== 'live' || s.auction.status === 'idle') {
+    idle.style.display   = 'flex';
+    itemEl.style.display = 'none';
+    updateTimerDisplay(0, false);
+    return;
+  }
+
+  idle.style.display   = 'none';
+  itemEl.style.display = 'block';
+
+  document.getElementById('d-item-icon').textContent = item.icon || '📦';
+  document.getElementById('d-item-name').textContent = item.name;
+  document.getElementById('d-item-desc').textContent = item.description || '';
+
+  const bidEl  = document.getElementById('d-bid');
+  const newBid = PRISM.fmt(item.current_bid || item.base_price);
+  if (bidEl.textContent !== newBid) {
+    bidEl.textContent = newBid;
+    bidEl.classList.remove('flash'); void bidEl.offsetWidth; bidEl.classList.add('flash');
+  }
+
+  const leader    = item.current_leader ? s.teams.find(t => t.id === item.current_leader) : null;
+  const leaderEl  = document.getElementById('d-leader');
+  const leaderDot = document.getElementById('d-leader-dot');
+  const leaderNm  = document.getElementById('d-leader-name');
+
+  if (leader) {
+    leaderEl.classList.add('has-leader');
+    leaderDot.style.background = leader.color;
+    leaderDot.style.boxShadow  = `0 0 12px ${leader.color}`;
+    leaderNm.textContent       = leader.name;
+    leaderNm.style.color       = leader.color;
+  } else {
+    leaderEl.classList.remove('has-leader');
+    leaderDot.style.background = 'var(--text3)';
+    leaderDot.style.boxShadow  = 'none';
+    leaderNm.textContent       = 'No bids yet';
+    leaderNm.style.color       = 'var(--text3)';
+  }
+
+  updateTimerDisplay(s.timer.value, s.timer.running);
+}
+
+function updateTimerDisplay(val, running) {
+  const num    = document.getElementById('d-timer-num');
+  const bar    = document.getElementById('d-timer-bar');
+  const isUrg  = val <= 10 && running && val > 0;
+
+  if (val === 0 && !running) {
+    num.textContent = '—';
+    num.className = 'd-timer-num';
+    bar.style.width = '0%';
+    bar.className = 'd-timer-bar-fill';
+    return;
+  }
+
+  num.textContent = val;
+  num.className   = 'd-timer-num' + (running ? ' running' : '') + (isUrg ? ' urgent' : '');
+  bar.className   = 'd-timer-bar-fill' + (isUrg ? ' urgent' : '');
+  const pct = timerMax > 0 ? (val / timerMax) * 100 : 0;
+  bar.style.width = pct + '%';
+}
+
+// ── SIDEBAR ──
+function renderSidebar(s) {
+  renderLeaderboard(s.leaderboard, s.auction.currentItem);
+  renderItemsList(s.items);
+  document.getElementById('d-teams-count').textContent = s.teams.length + ' teams';
+  document.getElementById('d-items-count').textContent = s.items.filter(i => i.status !== 'sold').length + ' remaining';
+}
+
+function renderLeaderboard(lb, currentItem) {
+  const medals = ['🥇','🥈','🥉'];
+  const el = document.getElementById('d-lb-list');
+  if (!lb?.length) { el.innerHTML = '<div style="padding:16px 24px;color:var(--text3);font-size:.7rem;font-family:var(--font-mono)">No data yet</div>'; return; }
+
+  el.innerHTML = lb.map((t, i) => {
+    const isLeading = currentItem?.current_leader === t.id;
+    const pct = t.budget > 0 ? Math.round((t.totalSpent / t.budget) * 100) : 0;
+    return `
+    <div class="d-lb-item ${isLeading ? 'leader' : ''}" style="--team-c:${t.color}">
+      <div class="d-lb-rank">${medals[i] || (i+1)}</div>
+      <div class="d-lb-dot ${isLeading ? 'active' : ''}" style="background:${t.color};--c:${t.color}"></div>
+      <div class="d-lb-info">
+        <div class="d-lb-name">${t.name}</div>
+        <div class="d-lb-bar"><div class="d-lb-bar-fill" style="width:${pct}%;background:${t.color}"></div></div>
+      </div>
+      <div class="d-lb-right">
+        <div class="d-lb-spent">${PRISM.fmt(t.totalSpent)}</div>
+        <div class="d-lb-wins">${t.itemsWon} won · ₹${Number(t.remaining||0).toLocaleString('en-IN')} left</div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function renderItemsList(items) {
+  if (!items?.length) return;
+  document.getElementById('d-items-list').innerHTML = items.map(item => {
+    const statusMap = {
+      live:     '<span style="color:var(--red);font-size:.6rem;letter-spacing:1px">● LIVE</span>',
+      sold:     '<span style="color:var(--text3)">✓</span>',
+      upcoming: '',
+    };
+    return `
+    <div class="d-items-row ${item.status === 'live' ? 'd-live' : ''} ${item.status === 'sold' ? 'd-sold' : ''}">
+      <div class="d-items-icon">${item.icon || '📦'}</div>
+      <div class="d-items-name">${item.name}</div>
+      <div class="d-items-status">${statusMap[item.status] || ''}</div>
+    </div>`;
+  }).join('');
+}
+
+// ── BOTTOM TICKER ──
+function renderBottomBar(s) {
+  const ticker = document.getElementById('d-ticker');
+  const statusLabels = {
+    idle:   '⏳ Auction is about to begin — teams get ready',
+    active: '🟢 Bidding is OPEN — place your bids now',
+    paused: '⏸ Auction paused temporarily',
+    ended:  '🏁 Auction has ended — final results above',
+  };
+  let items = [`<span class="ticker-item">${statusLabels[s.auction.status] || '—'}</span>`];
+  wonItems.forEach(w => {
+    items.push(`<span class="ticker-sep">·</span>`);
+    items.push(`<span class="ticker-item won">🏆 ${w.team} won ${w.item} for ${PRISM.fmt(w.amount)}</span>`);
+  });
+  ticker.innerHTML = items.join('');
+}
+
+// ── AMBIENT GLOW ── changes based on leading team color
+function setAmbient(s) {
+  const ambient = document.getElementById('ambient');
+  const leader = s.auction.currentItem?.current_leader;
+  const color  = leader ? s.teams.find(t => t.id === leader)?.color : null;
+  if (color) {
+    const r = parseInt(color.slice(1,3),16);
+    const g = parseInt(color.slice(3,5),16);
+    const b = parseInt(color.slice(5,7),16);
+    ambient.style.background =
+      `radial-gradient(ellipse 60% 40% at 30% 60%, rgba(${r},${g},${b},.04) 0%, transparent 70%)`;
+  } else {
+    ambient.style.background =
+      `radial-gradient(ellipse 60% 40% at 50% 50%, rgba(59,130,246,.03) 0%, transparent 70%)`;
+  }
+}
+
+// ── WINNER TAKEOVER ──
+let winnerTimer = null;
+
+function showWinner(d) {
+  PRISM.confetti();
+
+  const takeover = document.getElementById('winner-takeover');
+  const teamEl   = document.getElementById('wt-team');
+  const itemEl   = document.getElementById('wt-item');
+  const priceEl  = document.getElementById('wt-price');
+
+  teamEl.textContent  = d.team?.name?.toUpperCase() || 'WINNER';
+  teamEl.style.color  = d.team?.color || 'var(--amber)';
+  teamEl.style.textShadow = `0 0 60px ${d.team?.color || 'var(--amber)'}`;
+  itemEl.textContent  = d.item?.name || '—';
+  priceEl.textContent = PRISM.fmt(d.amount);
+
+  takeover.classList.add('show');
+
+  clearTimeout(winnerTimer);
+  winnerTimer = setTimeout(() => {
+    takeover.classList.remove('show');
+  }, 7000);
+}
+</script>
+</body>
+</html>

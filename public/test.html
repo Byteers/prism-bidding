@@ -1,0 +1,445 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PRism — Phase 2 Test Harness</title>
+<script src="/socket.io/socket.io.js"></script>
+<script src="/assets/js/prism.js"></script>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:#0a0b0f; color:#f1f5f9; font-family:'Courier New',monospace; padding:24px; }
+  h1 { color:#3b82f6; font-size:1.4rem; margin-bottom:4px; }
+  .sub { color:#64748b; font-size:.75rem; margin-bottom:24px; }
+
+  .grid { display:grid; grid-template-columns:1fr 1fr 1fr; gap:16px; margin-bottom:20px; }
+  @media(max-width:900px){ .grid{ grid-template-columns:1fr; } }
+
+  .panel { background:#111318; border:1px solid #1e293b; border-radius:8px; padding:16px; }
+  .panel h2 { font-size:.7rem; letter-spacing:2px; color:#64748b; margin-bottom:12px; text-transform:uppercase; }
+
+  .btn {
+    font-family:'Courier New',monospace; font-size:.7rem; letter-spacing:1px;
+    padding:8px 14px; border-radius:5px; cursor:pointer; border:none;
+    margin:3px; transition:all .2s; text-transform:uppercase;
+  }
+  .btn-blue   { background:#3b82f6; color:#fff; }
+  .btn-green  { background:#22c55e; color:#000; }
+  .btn-amber  { background:#f59e0b; color:#000; }
+  .btn-red    { background:#ef4444; color:#fff; }
+  .btn-gray   { background:#1e293b; color:#94a3b8; border:1px solid #334155; }
+  .btn:hover  { opacity:.85; transform:scale(.98); }
+  .btn:active { transform:scale(.95); }
+
+  input, select {
+    background:#1e293b; border:1px solid #334155; color:#f1f5f9;
+    font-family:'Courier New',monospace; font-size:.75rem;
+    padding:7px 10px; border-radius:5px; margin:3px; width:140px;
+  }
+
+  .log-wrap { background:#050508; border:1px solid #1e293b; border-radius:8px; padding:12px; height:280px; overflow-y:auto; }
+  .log-entry { font-size:.68rem; padding:3px 0; border-bottom:1px solid #0f1117; line-height:1.5; }
+  .log-entry .ts  { color:#475569; margin-right:8px; }
+  .log-entry .ev  { color:#3b82f6; font-weight:bold; margin-right:6px; }
+  .log-entry.bid  { color:#22c55e; }
+  .log-entry.win  { color:#f59e0b; }
+  .log-entry.err  { color:#ef4444; }
+  .log-entry.timer{ color:#a855f7; }
+
+  .status-bar {
+    display:flex; gap:16px; flex-wrap:wrap;
+    background:#111318; border:1px solid #1e293b; border-radius:8px;
+    padding:12px 16px; margin-bottom:16px; font-size:.7rem;
+  }
+  .stat { display:flex; flex-direction:column; gap:2px; }
+  .stat-label { color:#475569; letter-spacing:1px; text-transform:uppercase; font-size:.58rem; }
+  .stat-val { color:#f1f5f9; font-size:.85rem; }
+  .stat-val.green { color:#22c55e; }
+  .stat-val.amber { color:#f59e0b; }
+  .stat-val.red   { color:#ef4444; }
+  .stat-val.blue  { color:#3b82f6; }
+
+  .ws-dot { display:inline-block; width:8px; height:8px; border-radius:50%; background:#ef4444; margin-right:4px; }
+  .ws-dot.connected { background:#22c55e; box-shadow:0 0 6px #22c55e; animation:glow 1.5s ease infinite; }
+  @keyframes glow { 50%{ opacity:.6; } }
+
+  .auth-row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:12px; padding-bottom:12px; border-bottom:1px solid #1e293b; }
+  .auth-row label { font-size:.65rem; color:#64748b; letter-spacing:1px; }
+  .badge { font-size:.6rem; padding:2px 8px; border-radius:10px; font-weight:bold; }
+  .badge.admin { background:rgba(239,68,68,.15); color:#ef4444; border:1px solid rgba(239,68,68,.3); }
+  .badge.team  { background:rgba(59,130,246,.15); color:#3b82f6; border:1px solid rgba(59,130,246,.3); }
+  .badge.guest { background:rgba(100,116,139,.1);  color:#64748b; border:1px solid #334155; }
+</style>
+</head>
+<body>
+
+<h1>🧪 PRism — Phase 2 Real-Time Test Harness</h1>
+<p class="sub">Verify all socket events and API endpoints are working correctly before building the UI.</p>
+
+<!-- STATUS BAR -->
+<div class="status-bar">
+  <div class="stat">
+    <div class="stat-label">WebSocket</div>
+    <div class="stat-val"><span class="ws-dot" id="ws-dot"></span><span class="ws-label" id="ws-label">Connecting...</span></div>
+  </div>
+  <div class="stat">
+    <div class="stat-label">Session</div>
+    <div class="stat-val" id="st-session">Guest</div>
+  </div>
+  <div class="stat">
+    <div class="stat-label">Auction</div>
+    <div class="stat-val blue" id="st-auction">—</div>
+  </div>
+  <div class="stat">
+    <div class="stat-label">Active Item</div>
+    <div class="stat-val amber" id="st-item">None</div>
+  </div>
+  <div class="stat">
+    <div class="stat-label">Current Bid</div>
+    <div class="stat-val green" id="st-bid">—</div>
+  </div>
+  <div class="stat">
+    <div class="stat-label">Timer</div>
+    <div class="stat-val red" id="st-timer">—</div>
+  </div>
+  <div class="stat">
+    <div class="stat-label">Teams</div>
+    <div class="stat-val" id="st-teams">—</div>
+  </div>
+  <div class="stat">
+    <div class="stat-label">Events</div>
+    <div class="stat-val" id="st-events">0</div>
+  </div>
+</div>
+
+<div class="grid">
+
+  <!-- AUTH PANEL -->
+  <div class="panel">
+    <h2>🔐 Auth</h2>
+    <div class="auth-row">
+      <label>ROLE:</label>
+      <span class="badge guest" id="role-badge">GUEST</span>
+    </div>
+
+    <div style="margin-bottom:8px">
+      <div style="font-size:.62rem;color:#475569;margin-bottom:4px">ADMIN LOGIN</div>
+      <input type="password" id="admin-pw" placeholder="Admin password" value="prism@admin" />
+      <button class="btn btn-red" onclick="loginAdmin()">Login Admin</button>
+    </div>
+
+    <div>
+      <div style="font-size:.62rem;color:#475569;margin-bottom:4px">TEAM LOGIN</div>
+      <select id="team-select">
+        <option value="nexus">nexus</option>
+        <option value="zenith">zenith</option>
+        <option value="aurora">aurora</option>
+        <option value="nova">nova</option>
+        <option value="forge">forge</option>
+      </select>
+      <input type="text" id="team-pw" placeholder="Password" value="nexus123" style="width:100px" />
+      <button class="btn btn-blue" onclick="loginTeam()">Login Team</button>
+    </div>
+
+    <div style="margin-top:10px">
+      <button class="btn btn-gray" onclick="logout()">Logout</button>
+      <button class="btn btn-gray" onclick="checkMe()">Who Am I?</button>
+    </div>
+  </div>
+
+  <!-- AUCTION CONTROL -->
+  <div class="panel">
+    <h2>⚡ Auction Control (Admin)</h2>
+    <div style="margin-bottom:10px">
+      <button class="btn btn-green"  onclick="emit('admin:start-auction',{})">▶ Start</button>
+      <button class="btn btn-amber"  onclick="emit('admin:pause-auction',{})">⏸ Pause</button>
+      <button class="btn btn-blue"   onclick="emit('admin:resume-auction',{})">↺ Resume</button>
+      <button class="btn btn-red"    onclick="emit('admin:end-auction',{})">■ End</button>
+    </div>
+
+    <div style="margin-bottom:10px">
+      <div style="font-size:.62rem;color:#475569;margin-bottom:4px">ACTIVATE ITEM</div>
+      <select id="item-select" style="width:180px">
+        <option value="1">Item 1</option>
+        <option value="2">Item 2</option>
+        <option value="3">Item 3</option>
+        <option value="4">Item 4</option>
+        <option value="5">Item 5</option>
+        <option value="6">Item 6</option>
+      </select>
+      <button class="btn btn-blue" onclick="activateItem()">Activate</button>
+      <button class="btn btn-gray" onclick="emit('admin:next-item',{})">Next →</button>
+    </div>
+
+    <div>
+      <button class="btn btn-green" onclick="emit('admin:award-item',{})">🏆 Award</button>
+      <button class="btn btn-gray"  onclick="emit('admin:reset-all',{})">🔄 Reset All</button>
+    </div>
+  </div>
+
+  <!-- TIMER CONTROL -->
+  <div class="panel">
+    <h2>⏱ Timer Control (Admin)</h2>
+    <div style="margin-bottom:10px">
+      <button class="btn btn-green" onclick="startTimer(30)">30s</button>
+      <button class="btn btn-green" onclick="startTimer(45)">45s</button>
+      <button class="btn btn-green" onclick="startTimer(60)">60s</button>
+      <button class="btn btn-green" onclick="startTimer(90)">90s</button>
+    </div>
+    <div style="margin-bottom:10px">
+      <input type="number" id="custom-timer" placeholder="Custom secs" value="60" style="width:120px" />
+      <button class="btn btn-blue" onclick="startCustomTimer()">Start</button>
+    </div>
+    <div>
+      <button class="btn btn-amber" onclick="emit('admin:stop-timer',{})">⏹ Stop</button>
+      <button class="btn btn-gray"  onclick="emit('admin:reset-timer',{seconds:60})">↺ Reset 60s</button>
+      <button class="btn btn-blue"  onclick="emit('admin:extend-timer',{seconds:15})">+15s</button>
+    </div>
+  </div>
+
+  <!-- TEAM BID -->
+  <div class="panel">
+    <h2>💰 Place Bid (Team)</h2>
+    <div style="color:#475569;font-size:.65rem;margin-bottom:8px">Log in as a team first, then start auction + activate item + start timer</div>
+    <input type="number" id="bid-amount" placeholder="Bid amount" value="5500" style="width:140px" />
+    <button class="btn btn-green" onclick="placeBid()">Place Bid</button>
+    <div style="margin-top:8px;font-size:.65rem;color:#475569" id="bid-feedback"></div>
+  </div>
+
+  <!-- STATE INSPECTOR -->
+  <div class="panel">
+    <h2>🔍 State Inspector</h2>
+    <div style="margin-bottom:8px">
+      <button class="btn btn-gray" onclick="fetchState()">Fetch /api/state</button>
+      <button class="btn btn-gray" onclick="fetchTeams()">Fetch Teams</button>
+      <button class="btn btn-gray" onclick="fetchItems()">Fetch Items</button>
+    </div>
+    <div id="state-output" style="font-size:.6rem;color:#64748b;max-height:140px;overflow-y:auto;background:#050508;padding:8px;border-radius:4px;white-space:pre-wrap;word-break:break-all"></div>
+  </div>
+
+  <!-- LEADERBOARD -->
+  <div class="panel">
+    <h2>🏅 Live Leaderboard</h2>
+    <div id="lb-display" style="font-size:.7rem;"></div>
+  </div>
+
+</div>
+
+<!-- EVENT LOG -->
+<div class="panel">
+  <h2>📡 Real-Time Event Log <button class="btn btn-gray" onclick="clearLog()" style="margin-left:8px;padding:4px 8px">Clear</button></h2>
+  <div class="log-wrap" id="event-log"></div>
+</div>
+
+<script>
+let eventCount = 0;
+
+// ── CONNECT ──
+PRISM.connect();
+
+// Override status setters
+const origSetWs = PRISM.setWsStatus.bind(PRISM);
+PRISM.setWsStatus = function(status) {
+  const dot   = document.getElementById('ws-dot');
+  const label = document.getElementById('ws-label');
+  if (dot)   { dot.className = 'ws-dot' + (status === 'connected' ? ' connected' : ''); }
+  if (label) { label.textContent = status === 'connected' ? 'CONNECTED' : 'OFFLINE'; }
+};
+
+// ── EVENT HANDLERS ──
+window.onStateUpdate = function(s) {
+  log('state:full', `auction=${s.auction.status} | item=${s.auction.currentItem?.name||'none'} | timer=${s.timer.value}s | teams=${s.teams.length}`);
+  updateStatusBar(s);
+  updateLeaderboard(s.leaderboard);
+  // Populate item select
+  const sel = document.getElementById('item-select');
+  sel.innerHTML = s.items.filter(i => i.status !== 'sold').map(i =>
+    `<option value="${i.id}">[${i.status.toUpperCase()}] ${i.name}</option>`
+  ).join('');
+};
+
+window.onBidNew = function(d) {
+  log('bid:new', `${d.teamName} → ₹${Number(d.amount).toLocaleString('en-IN')} on ${d.itemName}`, 'bid');
+};
+
+window.onBidUpdated = function(d) {
+  log('bid:updated', `${d.item?.name} → ₹${Number(d.item?.current_bid||0).toLocaleString('en-IN')}`, 'bid');
+};
+
+window.onItemActivated = function(d) {
+  log('item:activated', `${d.item?.name} is now LIVE`);
+};
+
+window.onItemSold = function(d) {
+  log('item:sold', `${d.team?.name} wins ${d.item?.name} for ₹${Number(d.amount).toLocaleString('en-IN')}`, 'win');
+};
+
+window.onWinnerAnnounce = function(d) {
+  log('winner:announce', `🏆 ${d.team?.name} wins ${d.item?.name}!`, 'win');
+};
+
+window.onTimerTick = function(d) {
+  const el = document.getElementById('st-timer');
+  if (el) el.textContent = `${d.value}s ${d.running ? '▶' : '⏹'}`;
+  if (d.value % 10 === 0 || d.value <= 5) {
+    log('timer:tick', `${d.value}s remaining | running=${d.running}`, 'timer');
+  }
+};
+
+window.onTimerEnded = function() {
+  log('timer:ended', 'Countdown complete!', 'timer');
+};
+
+window.onAuctionEvent = function(type) {
+  log(`auction:${type}`, `Auction is now ${type}`);
+};
+
+PRISM.socket.on('admin:error', d => log('admin:error', d.message, 'err'));
+
+// ── HELPERS ──
+function log(event, data, type = '') {
+  eventCount++;
+  document.getElementById('st-events').textContent = eventCount;
+  const el = document.getElementById('event-log');
+  const ts  = new Date().toLocaleTimeString('en-IN', { hour12: false });
+  const div = document.createElement('div');
+  div.className = `log-entry ${type}`;
+  div.innerHTML = `<span class="ts">${ts}</span><span class="ev">${event}</span>${data}`;
+  el.insertBefore(div, el.firstChild);
+  if (el.children.length > 100) el.removeChild(el.lastChild);
+}
+
+function clearLog() {
+  document.getElementById('event-log').innerHTML = '';
+  eventCount = 0;
+  document.getElementById('st-events').textContent = '0';
+}
+
+function updateStatusBar(s) {
+  document.getElementById('st-auction').textContent = s.auction.status.toUpperCase();
+  document.getElementById('st-item').textContent    = s.auction.currentItem?.name || 'None';
+  document.getElementById('st-bid').textContent     = s.auction.currentItem?.current_bid
+    ? '₹' + Number(s.auction.currentItem.current_bid).toLocaleString('en-IN') : '—';
+  document.getElementById('st-timer').textContent   = s.timer.value + 's';
+  document.getElementById('st-teams').textContent   = s.teams.length;
+}
+
+function updateLeaderboard(lb) {
+  if (!lb || !lb.length) return;
+  document.getElementById('lb-display').innerHTML = lb.map((t, i) => `
+    <div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid #1e293b">
+      <span style="color:${i===0?'#f59e0b':i===1?'#94a3b8':i===2?'#cd7f32':'#475569'};font-weight:bold;width:20px">#${t.rank}</span>
+      <span style="flex:1;font-size:.75rem">${t.name}</span>
+      <span style="color:#22c55e;font-size:.7rem">₹${Number(t.totalSpent).toLocaleString('en-IN')}</span>
+      <span style="color:#475569;font-size:.62rem">${t.itemsWon}W</span>
+    </div>`).join('');
+}
+
+function emit(event, data) {
+  PRISM.emit(event, data);
+  log(event, JSON.stringify(data), '');
+}
+
+function activateItem() {
+  const id = parseInt(document.getElementById('item-select').value);
+  emit('admin:activate-item', { itemId: id });
+}
+
+function startTimer(s) { emit('admin:start-timer', { seconds: s }); }
+
+function startCustomTimer() {
+  const s = parseInt(document.getElementById('custom-timer').value) || 60;
+  startTimer(s);
+}
+
+async function placeBid() {
+  const amount = parseInt(document.getElementById('bid-amount').value);
+  const fb = document.getElementById('bid-feedback');
+  PRISM.emit('team:bid', { amount }, (res) => {
+    fb.textContent = res.success ? `✅ Bid placed: ₹${Number(res.amount).toLocaleString('en-IN')}` : `❌ ${res.message}`;
+    fb.style.color = res.success ? '#22c55e' : '#ef4444';
+    log('team:bid', res.success ? `✅ ₹${amount}` : `❌ ${res.message}`, res.success ? 'bid' : 'err');
+  });
+}
+
+async function loginAdmin() {
+  const pw = document.getElementById('admin-pw').value;
+  const r  = await PRISM.post('/api/auth/admin-login', { password: pw });
+  if (r.success) {
+    document.getElementById('role-badge').textContent = 'ADMIN';
+    document.getElementById('role-badge').className = 'badge admin';
+    document.getElementById('st-session').textContent = 'Admin';
+    log('auth', 'Admin logged in ✅');
+    // Reconnect socket with new session
+    PRISM.socket.disconnect(); setTimeout(() => PRISM.socket.connect(), 900);
+  } else {
+    log('auth', `Admin login failed: ${r.message}`, 'err');
+  }
+}
+
+async function loginTeam() {
+  const teamId  = document.getElementById('team-select').value;
+  const password= document.getElementById('team-pw').value;
+  const r = await PRISM.post('/api/auth/team-login', { teamId, password });
+  if (r.success) {
+    document.getElementById('role-badge').textContent = teamId.toUpperCase();
+    document.getElementById('role-badge').className = 'badge team';
+    document.getElementById('st-session').textContent = r.teamName;
+    log('auth', `Team ${r.teamName} logged in ✅`);
+    PRISM.socket.disconnect(); setTimeout(() => PRISM.socket.connect(), 900);
+  } else {
+    log('auth', `Team login failed: ${r.message}`, 'err');
+  }
+}
+
+async function logout() {
+  await PRISM.post('/api/auth/logout');
+  document.getElementById('role-badge').textContent = 'GUEST';
+  document.getElementById('role-badge').className = 'badge guest';
+  document.getElementById('st-session').textContent = 'Guest';
+  log('auth', 'Logged out');
+  PRISM.socket.disconnect(); setTimeout(() => PRISM.socket.connect(), 900);
+}
+
+async function checkMe() {
+  const r = await PRISM.get('/api/auth/me');
+  showOutput(r);
+  log('auth:me', JSON.stringify(r));
+}
+
+async function fetchState() {
+  const r = await PRISM.get('/api/state');
+  showOutput(r);
+  log('api', 'Fetched /api/state');
+}
+
+async function fetchTeams() {
+  const r = await PRISM.get('/api/teams');
+  showOutput(r);
+  log('api', `Fetched ${r.length} teams`);
+}
+
+async function fetchItems() {
+  const r = await PRISM.get('/api/items');
+  showOutput(r);
+  log('api', `Fetched ${r.length} items`);
+}
+
+function showOutput(data) {
+  document.getElementById('state-output').textContent = JSON.stringify(data, null, 2);
+}
+
+// Auto-update bid input based on current item
+setInterval(() => {
+  const s = PRISM.state;
+  if (s?.auction?.currentItem?.current_bid) {
+    const min = Number(s.auction.currentItem.current_bid) + 100;
+    const el  = document.getElementById('bid-amount');
+    if (el && parseInt(el.value) < min) el.value = min;
+  }
+}, 2000);
+
+log('system', 'Test harness loaded — connecting to socket...');
+</script>
+</body>
+</html>
